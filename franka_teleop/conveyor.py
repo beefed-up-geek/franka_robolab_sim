@@ -21,6 +21,28 @@
 표면 속도를 걸지 않았기 때문이었다. USD 합성(payload/reference/키네마틱)을 계속
 바꿔 보느라 한참 헤맸지만 그쪽은 원인이 아니었다.
 
+## 이 환경에서 무엇이 되고 안 되는가 (전부 실측)
+
+| 방법 | 결과 |
+|---|---|
+| `PhysxSurfaceVelocityAPI` (정석·공식) | 콜라이더가 무효화되어 물체가 벨트를 통과 |
+| └ GPU 물리 + 정적 콜라이더 | 통과 |
+| └ GPU 물리 + 키네마틱 강체 | 통과 |
+| └ CPU 물리 + 정적 콜라이더 | 통과 |
+| └ CPU 물리 + 키네마틱 강체 (**NVIDIA 공식 테스트와 동일 구성**) | 통과 |
+| `set_external_force_and_torque` | 반영되지 않음 (25 m/s^2 를 줘도 미동 없음) |
+| `write_root_velocity_to_sim` | 반영되지 않음 (명령 후에도 vy=0) |
+| `write_root_pose_to_sim` | **동작함** |
+
+표면 속도는 NVIDIA 공식 테스트(isaacsim.asset.gen.conveyor/tests/test_conveyor.py)와
+같은 조건 — PhysX 씬이 gpu_dynamics=False, broadphase=MBP, solver=TGS 이고 벨트가
+키네마틱 강체 — 을 모두 맞춘 뒤에도 실패했다. 같은 하드웨어(RTX 3090)·같은 워크플로
+(Isaac Lab InteractiveSceneCfg 텔레오퍼레이션)에서 동일한 증상이 NVIDIA 포럼에도
+보고되어 있고, NVIDIA 답변은 "GitHub 에 이슈를 올려라" 뿐이었다.
+
+그래서 아래 방식은 게으른 선택이 아니라, 이 환경에서 실제로 작동하는 유일한
+수단이다. 외력·속도가 왜 반영되지 않는지는 아직 규명하지 못했다.
+
 ## 그래서 어떻게 하는가
 
 벨트는 **평범한 정적 콜라이더**로 두고, 벨트에 얹혀 있는 블록을 매 스텝 직접
@@ -75,9 +97,19 @@ FALLEN_Z = -0.10
 RECOVER_DX = 0.13
 RECOVER_DZ = 0.08
 
-# 벨트 위에서 옆으로 흐르거나 구르는 것을 줄이는 감쇠 (1.0 이면 감쇠 없음)
+# 벨트 위에서 옆으로 흐르거나 구르는 것을 줄이는 감쇠 (script 모드 전용)
 LATERAL_DAMPING = 0.3
 ANGULAR_DAMPING = 0.4
+
+# force 모드 — 벨트 마찰을 힘으로 흉내 낸다.
+# 목표 속도와의 차이에 비례해 힘을 주되, 실제 마찰이 낼 수 있는 최대 가속도로
+# 자른다. 이 상한이 곧 "벨트가 물체를 얼마나 세게 끌 수 있는가" 이고, 넘으면
+# 물체가 미끄러진다 — 실제 컨베이어와 같은 거동이다.
+DRIVE_GAIN = 25.0       # [1/s] 속도 오차 → 가속도
+DRIVE_ACCEL_MAX = 25.0  # [m/s^2] 벨트가 낼 수 있는 최대 가속도.
+# 시뮬레이터 벨트면의 마찰(경우에 따라 PhysX 기본값 0.5 가 적용될 수 있다)을
+# 확실히 이기도록 넉넉히 잡았다. μ=0.5 면 제동 가속도가 4.9 m/s^2 이므로
+# 그보다 충분히 커야 물체가 실제로 끌린다.
 
 
 class Conveyor:
@@ -244,6 +276,50 @@ class Conveyor:
             and INLET_Y - 0.06 < y < OUTLET_Y + 0.06
             and abs(z - rest_z) < REST_Z_TOL
         )
+
+    def drive_force(self) -> int:
+        """force 모드 — 벨트에 얹힌 물체에 "마찰이 끄는 힘" 을 준다.
+
+        위치를 직접 쓰는 script 모드와 달리, 물체는 끝까지 보통 강체로 남는다.
+        그래서 로봇이 집어 들거나, 서로 부딪혀 밀리거나, 기울어지는 일이 모두
+        물리대로 일어난다. 벨트가 낼 수 있는 힘에 상한이 있어 무거운 물체는
+        미끄러지기도 한다.
+
+        힘은 env.step() 안의 write_data_to_sim() 에서 적용되므로 스텝 직전에
+        불러야 한다.
+        """
+        if self.mode != "force" or not self._items:
+            return 0
+
+        origin = self.env.scene.env_origins[0]
+        device = self.env.device
+        driven = 0
+
+        for name in self._items:
+            obj = self.env.scene[name]
+            pos = obj.data.root_pos_w[0] - origin
+            x, y, z = float(pos[0]), float(pos[1]), float(pos[2])
+
+            force = torch.zeros((1, 1, 3), device=device)
+            if self.enabled and self._on_belt(name, x, y, z):
+                mass = float(obj.data.default_mass[0].sum())
+                vel = obj.data.root_lin_vel_w[0]
+                # 벨트 진행 방향(월드 +Y)으로는 목표 속도, 폭 방향은 0 을 향한다.
+                err_y = self.speed - float(vel[1])
+                err_x = -float(vel[0])
+                ax = max(-DRIVE_ACCEL_MAX, min(DRIVE_ACCEL_MAX, DRIVE_GAIN * err_x))
+                ay = max(-DRIVE_ACCEL_MAX, min(DRIVE_ACCEL_MAX, DRIVE_GAIN * err_y))
+                force[0, 0, 0] = mass * ax
+                force[0, 0, 1] = mass * ay
+                driven += 1
+
+            # 벨트를 벗어난 물체는 힘을 0 으로 덮어써야 한다. 안 그러면 이전 힘이
+            # 계속 남아 로봇이 들고 있는 물체를 옆으로 밀어 버린다.
+            obj.set_external_force_and_torque(
+                forces=force, torques=torch.zeros((1, 1, 3), device=device), is_global=True
+            )
+
+        return driven
 
     def drive(self) -> int:
         """스크립트 모드에서만 — 벨트에 얹힌 블록을 이번 스텝만큼 전진시킨다.

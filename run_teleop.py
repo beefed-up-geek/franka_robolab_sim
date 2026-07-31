@@ -34,9 +34,10 @@ parser.add_argument(
     "--conveyor",
     type=str,
     default="script",
-    choices=["script", "surface"],
-    help="script=벨트에 얹힌 강체를 매 스텝 전진(기본). "
-         "surface=PhysX 표면 속도 — 이 구성에서는 콜라이더가 깨져 동작하지 않는다.",
+    choices=["script", "force", "surface"],
+    help="script=위치를 직접 전진(기본, 이 환경에서 유일하게 동작). "
+         "force=외력으로 마찰 흉내 — 외력이 반영되지 않아 동작하지 않는다. "
+         "surface=PhysX 표면 속도 — 콜라이더가 깨져 동작하지 않는다.",
 )
 parser.add_argument(
     "--no-fabric",
@@ -206,6 +207,40 @@ def screen_to_world(delta: list[float], azimuth: float) -> list[float]:
     ]
 
 
+def log_physics_scene() -> None:
+    """PhysX 씬 설정을 찍는다.
+
+    NVIDIA 의 공식 컨베이어 테스트는 enableGPUDynamics=False, broadphase=MBP 를
+    전제로 한다. Isaac Lab 에 device="cpu" 를 준다고 이 값들이 실제로 그렇게
+    되는지는 확인해 봐야 안다 — 표면 속도가 안 먹는 이유일 수 있다.
+    """
+    try:
+        import omni.usd
+        from pxr import PhysxSchema, UsdPhysics
+
+        stage = omni.usd.get_context().get_stage()
+        for prim in stage.Traverse():
+            if not prim.IsA(UsdPhysics.Scene):
+                continue
+            api = PhysxSchema.PhysxSceneAPI.Get(stage, prim.GetPath())
+            def val(getter):
+                try:
+                    a = getter()
+                    return a.Get() if a else None
+                except Exception:
+                    return None
+            print(
+                f"[physx] {prim.GetPath()} "
+                f"gpu_dynamics={val(api.GetEnableGPUDynamicsAttr)} "
+                f"broadphase={val(api.GetBroadphaseTypeAttr)} "
+                f"solver={val(api.GetSolverTypeAttr)} "
+                f"ccd={val(api.GetEnableCCDAttr)}",
+                flush=True,
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[physx] 조회 실패: {exc}", flush=True)
+
+
 def log_scene_bounds() -> None:
     """로드된 스테이지에서 테이블과 창고의 실제 크기·위치를 재서 찍는다.
 
@@ -296,6 +331,7 @@ def main() -> None:
           f"컨베이어={args_cli.conveyor}", flush=True)
     obs, _ = env.reset()
     log_scene_bounds()
+    log_physics_scene()
 
     belt = Conveyor(
         env,
@@ -341,8 +377,9 @@ def main() -> None:
             belt.set_enabled(on)
             belt.set_speed(speed)
 
-        # 벨트에 얹힌 블록을 밀어 준다. env.step() 직전에 써야 이번 스텝에 반영된다.
+        # 벨트에 얹힌 물체를 밀어 준다. env.step() 직전에 써야 이번 스텝에 반영된다.
         belt.drive()
+        belt.drive_force()
 
         # 시점이 바뀐 경우에만 카메라를 옮긴다 — 매 스텝 쓰면 낭비다.
         if camera is not None:

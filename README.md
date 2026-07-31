@@ -150,7 +150,7 @@ DLS 감쇠와 PD 추종 지연 때문에 대략 1/3 수준만 반영된다. `con
 쿼터니언 성분 순서가 어긋나 있다. `franka_teleop/camera.py` 는 look-at 을 직접 계산해
 쓴다 — 시점을 바꾸려면 성분을 눈대중으로 만지지 말고 look-at 을 다시 계산할 것.
 
-### 컨베이어는 PhysX 표면 속도로 만들 수 없었다
+### 컨베이어는 PhysX 표면 속도로 만들 수 없었다 (공식 방식 포함)
 
 가장 오래 걸린 부분이다. 컨베이어의 정석은 `PhysxSurfaceVelocityAPI`(표면 속도)이고,
 공식 `isaacsim.asset.gen.conveyor` 익스텐션도 소스를 보면 똑같이
@@ -168,10 +168,34 @@ DLS 감쇠와 PD 추종 지연 때문에 대략 1/3 수준만 반영된다. `con
 정적 vs 키네마틱)을 의심하며 헤맸다. 씬 파일에 직접 넣은 검증용 콜라이더는 잘
 동작했는데 — 그 프림에만 표면 속도를 걸지 않았기 때문이었다.
 
-지금은 벨트를 **평범한 정적 콜라이더**로 두고, 벨트에 얹힌 블록의 위치를 매 스텝
-`speed × dt` 만큼 전진시킨다(`franka_teleop/conveyor.py`). 속도만 쓰는
-(`write_root_velocity_to_sim`) 방법은 반영되지 않았고 — 명령 후에도 vy 가 0 으로
-측정됐다 — **위치 쓰기는 확실히 동작**해서 그쪽을 택했다.
+NVIDIA 공식 테스트(`isaacsim.asset.gen.conveyor/tests/test_conveyor.py`)가 요구하는
+조건을 전부 맞춘 뒤에도 실패했다 — PhysX 씬이 `gpu_dynamics=False`,
+`broadphase=MBP`, `solver=TGS` 이고 벨트가 키네마틱 강체인 상태에서도 물체가 그대로
+통과한다. 시도한 조합과 결과:
+
+| 조합 | 결과 |
+|---|---|
+| GPU 물리 + 정적 콜라이더 + 표면속도 | 통과 |
+| GPU 물리 + 키네마틱 강체 + 표면속도 | 통과 |
+| CPU 물리 + 정적 콜라이더 + 표면속도 | 통과 |
+| CPU 물리 + 키네마틱 강체 + 표면속도 (**NVIDIA 공식 구성**) | 통과 |
+
+같은 하드웨어(RTX 3090)·같은 워크플로에서 동일한 증상이
+[NVIDIA 포럼](https://forums.developer.nvidia.com/t/isaac-lab-collision-fails-on-conveyor-surface-velocity-in-interactivescenecfg-teleoperation-task/359980)
+에도 보고되어 있고, NVIDIA 답변은 "GitHub 에 이슈를 올려라" 뿐이었다.
+
+대안으로 시도한 것들도 이 환경에서는 반영되지 않았다.
+
+| 방법 | 결과 |
+|---|---|
+| `set_external_force_and_torque` (마찰을 힘으로 모델링) | 25 m/s² 를 줘도 미동 없음 |
+| `write_root_velocity_to_sim` | 명령 후에도 vy=0 |
+| `write_root_pose_to_sim` | **동작함** |
+
+그래서 벨트를 **평범한 정적 콜라이더**로 두고, 벨트에 얹힌 물체의 위치를 매 스텝
+`speed × dt` 만큼 전진시킨다(`franka_teleop/conveyor.py`). 게으른 선택이 아니라
+이 환경에서 실제로 작동하는 유일한 수단이다. `--conveyor force` / `--conveyor surface`
+로 다른 방식을 시도해 볼 수 있게는 남겨 두었다.
 
 블록을 집어 올리면 z 가 "벨트에 얹힌 범위" 를 벗어나 구동 대상에서 빠지므로,
 그리퍼와 벨트가 서로 싸우지 않는다.
