@@ -67,6 +67,12 @@ CAM_RADIUS_MAX = 5.00
 CAM_ORBIT_SENS = 0.006              # 마우스 1px 당 회전량 [rad]
 CAM_ZOOM_SENS = 0.0015              # 휠 1단위 당 거리 변화 비율
 
+# ── 컨베이어 ────────────────────────────────────────────────────────────
+# 도면 FRS-CV-001 기준. 모터 정격 50rpm 일 때 벨트 0.110 m/s 가 나오는데,
+# 픽앤플레이스 시연에는 그 절반 정도가 다루기 좋다.
+BELT_SPEED_LEVELS = [0.00, 0.03, 0.06, 0.10]
+BELT_SPEED_DEFAULT_INDEX = 2
+
 # ── 영상 스트림 ─────────────────────────────────────────────────────────
 STREAM_JPEG_QUALITY = 75
 STREAM_MAX_FPS = 20        # 외부망 지연을 고려해 상한을 둔다
@@ -104,3 +110,6 @@ KEY_RESET = "KeyR"
 KEY_SPEED_DOWN = "BracketLeft"
 KEY_SPEED_UP = "BracketRight"
 KEY_VIEW_RESET = "KeyF"
+KEY_BELT_TOGGLE = "KeyB"
+KEY_BELT_SLOWER = "Comma"
+KEY_BELT_FASTER = "Period"

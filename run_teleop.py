@@ -21,7 +21,7 @@ import traceback
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="Franka 웹 키보드 텔레오퍼레이션")
-parser.add_argument("--task", type=str, default="WhiteTablePickPlaceTask")
+parser.add_argument("--task", type=str, default="ConveyorPickPlaceTask")
 parser.add_argument("--stream-width", type=int, default=960, help="브라우저로 보낼 영상 가로 폭 [px]")
 parser.add_argument(
     "--no-fabric",
@@ -68,7 +68,8 @@ from robolab.variations.camera import (  # noqa: E402
 from robolab.variations.lighting import SphereLightCfg  # noqa: E402
 
 from franka_teleop import config, safety  # noqa: E402
-from franka_teleop.background import WarehouseBackgroundCfg  # noqa: E402
+from franka_teleop.conveyor import Conveyor  # noqa: E402
+from franka_teleop.world_assets import WorldAssetsCfg  # noqa: E402
 from franka_teleop.camera import TeleopBehindCameraCfg  # noqa: E402
 from franka_teleop.state import TeleopState  # noqa: E402
 from franka_teleop.web_server import start_in_thread  # noqa: E402
@@ -112,7 +113,7 @@ def register_env(task: str, camera_cfg) -> None:
         robot_cfg=DroidCfg,
         camera_cfg=[camera_cfg],
         lighting_cfg=SphereLightCfg,
-        background_cfg=WarehouseBackgroundCfg,
+        background_cfg=WorldAssetsCfg,
         contact_gripper=contact_gripper,
         dt=1 / (60 * 2),
         render_interval=8,
@@ -274,6 +275,13 @@ def main() -> None:
     obs, _ = env.reset()
     log_scene_bounds()
 
+    belt = Conveyor(env, config.BELT_SPEED_LEVELS[config.BELT_SPEED_DEFAULT_INDEX])
+    if belt.ready:
+        print(f"[teleop] 컨베이어 준비 — 블록 {belt.block_count}개, "
+              f"초기 속도 {belt.speed:.2f} m/s", flush=True)
+    else:
+        print("[teleop] 경고: 반송면 또는 블록을 찾지 못해 컨베이어가 동작하지 않습니다.", flush=True)
+
     # 궤도 카메라용 핸들. 이름을 못 찾으면 시점 고정으로 동작한다.
     cam_name = camera_sensor_name(camera_cfg)
     camera = env.scene[cam_name] if cam_name and cam_name in env.scene.keys() else None
@@ -284,6 +292,7 @@ def main() -> None:
 
     action = torch.zeros(1, 7, device=env.device)
     step = 0
+    recycled = 0
     hz_mark, hz_step, hz = time.monotonic(), 0, 0.0
 
     # Isaac Sim(Kit)이 로깅 설정을 덮어써서 logger 출력이 사라진다.
@@ -296,7 +305,17 @@ def main() -> None:
         if reset:
             obs = reset_episode(env, state, f"R 키 (step {step})")
             step = 0
+            recycled = 0
             continue
+
+        belt_change = state.consume_belt()
+        if belt_change is not None:
+            speed, on = belt_change
+            belt.enabled = on
+            belt.set_speed(speed)
+
+        # 벨트에 얹힌 블록을 밀어 준다. env.step() 직전에 써야 이번 스텝에 반영된다.
+        belt.drive()
 
         # 시점이 바뀐 경우에만 카메라를 옮긴다 — 매 스텝 쓰면 낭비다.
         if camera is not None:
@@ -327,6 +346,9 @@ def main() -> None:
         obs, _, term, trunc, _ = env.step(action)
         step += 1
 
+        # 출구를 지난 블록을 입구로 되돌려 흐름을 끊기지 않게 한다.
+        recycled += belt.recycle()
+
         # 제어 주파수 측정 (1초 창)
         hz_step += 1
         now = time.monotonic()
@@ -348,12 +370,15 @@ def main() -> None:
             ee_z=float(ee[0, 2]) if ee is not None else None,
             step=step,
             hz=hz,
+            recycled=recycled,
+            **belt.status(),
             warn=warn,
         )
 
         if bool(term.any()) or bool(trunc.any()):
             obs = reset_episode(env, state, f"에피소드 종료 (step {step})")
             step = 0
+            recycled = 0
 
     end_episode(env)
     env.close()

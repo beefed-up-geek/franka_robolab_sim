@@ -1,0 +1,245 @@
+#usda 1.0
+(
+    doc = """소형 벨트 컨베이어 — 도면 FRS-CV-001.
+
+    로컬 좌표: 길이가 +X, 폭이 Y, 바닥이 Z=0. 원점은 바닥면 중앙.
+      X ∈ [-0.40, +0.40]  길이 800
+      Y ∈ [-0.10, +0.10]  폭   200
+      Z ∈ [ 0.00,  0.20]  높이 200
+    벨트 반송면 상단이 Z=0.200, 드럼 축이 Z=0.178 이다.
+
+    씬에 배치할 때 Z 축으로 90° 돌리면 길이가 월드 Y 를 향한다.
+
+    반송 동작은 belt_surface 프림에 PhysX 표면 속도(PhysxSurfaceVelocityAPI)를
+    걸어서 만든다. USDA 에는 콜라이더만 두고, 속도는 실행 중에 바꿀 수 있도록
+    franka_teleop/conveyor.py 가 파이썬에서 적용한다.
+
+    물리 주의 — 이 파일을 씬 USD 안에 payload/reference 로 붙이면 콜라이더가
+    PhysX 에 등록되지 않는다(정적·키네마틱 모두 실패를 확인했다). 반드시
+    franka_teleop/world_assets.py 처럼 **독립 씬 엔티티**로 스폰해야 한다.
+    """
+    defaultPrim = "conveyor"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "conveyor"
+{
+    def Scope "Looks"
+    {
+        def Material "Aluminum"
+        {
+            token outputs:mdl:displacement.connect = </conveyor/Looks/Aluminum/Shader.outputs:out>
+            token outputs:mdl:surface.connect = </conveyor/Looks/Aluminum/Shader.outputs:out>
+            token outputs:mdl:volume.connect = </conveyor/Looks/Aluminum/Shader.outputs:out>
+
+            def Shader "Shader"
+            {
+                uniform token info:implementationSource = "sourceAsset"
+                uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
+                uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+                color3f inputs:diffuse_color_constant = (0.72, 0.74, 0.76)
+                float inputs:metallic_constant = 0.85
+                float inputs:reflection_roughness_constant = 0.35
+                token outputs:out (renderType = "material")
+            }
+        }
+
+        def Material "BeltRubber"
+        {
+            token outputs:mdl:displacement.connect = </conveyor/Looks/BeltRubber/Shader.outputs:out>
+            token outputs:mdl:surface.connect = </conveyor/Looks/BeltRubber/Shader.outputs:out>
+            token outputs:mdl:volume.connect = </conveyor/Looks/BeltRubber/Shader.outputs:out>
+
+            def Shader "Shader"
+            {
+                uniform token info:implementationSource = "sourceAsset"
+                uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
+                uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+                color3f inputs:diffuse_color_constant = (0.055, 0.057, 0.062)
+                float inputs:metallic_constant = 0
+                float inputs:reflection_roughness_constant = 0.72
+                token outputs:out (renderType = "material")
+            }
+        }
+    }
+
+    # 마찰을 아주 낮게 잡는다. 반송은 PhysX 마찰이 아니라 franka_teleop/conveyor.py
+    # 가 매 스텝 블록 속도를 직접 써서 만들기 때문에(표면 속도 API 를 못 쓰는 이유는
+    # 그쪽 모듈 설명 참고), 마찰이 높으면 그 속도를 곧바로 제동해 버린다.
+    # min 으로 합성해 블록 쪽 마찰이 높아도 벨트 위에서는 잘 미끄러지게 한다.
+    def Material "BeltPhysics" (
+        prepend apiSchemas = ["PhysicsMaterialAPI", "PhysxMaterialAPI"]
+    )
+    {
+        float physics:dynamicFriction = 0.02
+        float physics:staticFriction = 0.02
+        float physics:restitution = 0
+        uniform token physxMaterial:frictionCombineMode = "min"
+    }
+
+    # ── 벨트 ────────────────────────────────────────────────────────────
+    # 실제로 물체를 실어 나르는 프림. 이름을 바꾸면 franka_teleop/conveyor.py
+    # 의 탐색이 실패하므로 그대로 둘 것.
+    #
+    # 두 번 헤맨 자리다.
+    #   - 처음엔 진짜 벨트처럼 2mm 판으로 만들었더니 블록이 그대로 통과했다.
+    #     얇은 정적 콜라이더는 PhysX 접촉 오프셋보다 얇아 접촉이 안 생긴다.
+    #   - 그래서 두껍게 만들되 안 보이게 하려고 visibility=invisible 을 줬더니
+    #     역시 통과했다. 물리 파서가 보이지 않는 프림을 건너뛴다.
+    # 결국 "보이면서 두꺼운" 하나의 슬래브로 정리했다. 드럼 지름(40)에 벨트
+    # 두께(2)를 더한 42mm 높이라, 드럼 사이를 벨트가 채운 것처럼 보인다.
+    # Z 0.158~0.200, 윗면이 반송면.
+    def Cube "belt_surface" (
+        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+    )
+    {
+        double size = 2
+        float3 xformOp:scale = (0.36, 0.075, 0.021)
+        double3 xformOp:translate = (0, 0, 0.179)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        rel material:binding = </conveyor/Looks/BeltRubber> (
+            bindMaterialAs = "strongerThanDescendants"
+        )
+        rel material:binding:physics = </conveyor/BeltPhysics>
+    }
+
+    # ── 드럼 ────────────────────────────────────────────────────────────
+    # Ø40 × 면폭 156, 축은 Y 방향. 시각 전용(콜라이더 없음) — 벨트가 이미
+    # 물리를 담당하므로 드럼까지 충돌체로 두면 물체가 끼기만 한다.
+    def Cylinder "drum_drive" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        uniform token axis = "Y"
+        double radius = 0.02
+        double height = 0.156
+        double3 xformOp:translate = (0.36, 0, 0.178)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        rel material:binding = </conveyor/Looks/BeltRubber> (
+            bindMaterialAs = "strongerThanDescendants"
+        )
+    }
+
+    def Cylinder "drum_idler" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        uniform token axis = "Y"
+        double radius = 0.02
+        double height = 0.156
+        double3 xformOp:translate = (-0.36, 0, 0.178)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        rel material:binding = </conveyor/Looks/BeltRubber> (
+            bindMaterialAs = "strongerThanDescendants"
+        )
+    }
+
+    # ── 프레임 ──────────────────────────────────────────────────────────
+    def Xform "frame"
+    {
+        # 사이드 프로파일 20×40, L800 — Y=±0.09, Z 0.158~0.198
+        def Cube "rail_left" (
+            prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            double size = 2
+            float3 xformOp:scale = (0.40, 0.01, 0.02)
+            double3 xformOp:translate = (0, 0.09, 0.178)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </conveyor/Looks/Aluminum> (
+                bindMaterialAs = "strongerThanDescendants"
+            )
+        }
+
+        def Cube "rail_right" (
+            prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            double size = 2
+            float3 xformOp:scale = (0.40, 0.01, 0.02)
+            double3 xformOp:translate = (0, -0.09, 0.178)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </conveyor/Looks/Aluminum> (
+                bindMaterialAs = "strongerThanDescendants"
+            )
+        }
+
+        # 슬라이더 베드 — 벨트가 처지지 않게 받친다 (시각 전용)
+        def Cube "slider_bed" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            double size = 2
+            float3 xformOp:scale = (0.338, 0.08, 0.0015)
+            double3 xformOp:translate = (0, 0, 0.1965)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </conveyor/Looks/Aluminum> (
+                bindMaterialAs = "strongerThanDescendants"
+            )
+        }
+
+        # 다리 20×20, Z 0~0.158. 도면대로 X=-0.30 / +0.24 (모터 커버를 피한다)
+        def Cube "leg_a" (prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"])
+        {
+            double size = 2
+            float3 xformOp:scale = (0.01, 0.01, 0.079)
+            double3 xformOp:translate = (-0.30, 0.09, 0.079)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </conveyor/Looks/Aluminum> (bindMaterialAs = "strongerThanDescendants")
+        }
+        def Cube "leg_b" (prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"])
+        {
+            double size = 2
+            float3 xformOp:scale = (0.01, 0.01, 0.079)
+            double3 xformOp:translate = (-0.30, -0.09, 0.079)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </conveyor/Looks/Aluminum> (bindMaterialAs = "strongerThanDescendants")
+        }
+        def Cube "leg_c" (prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"])
+        {
+            double size = 2
+            float3 xformOp:scale = (0.01, 0.01, 0.079)
+            double3 xformOp:translate = (0.24, 0.09, 0.079)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </conveyor/Looks/Aluminum> (bindMaterialAs = "strongerThanDescendants")
+        }
+        def Cube "leg_d" (prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"])
+        {
+            double size = 2
+            float3 xformOp:scale = (0.01, 0.01, 0.079)
+            double3 xformOp:translate = (0.24, -0.09, 0.079)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </conveyor/Looks/Aluminum> (bindMaterialAs = "strongerThanDescendants")
+        }
+
+        # 크로스 멤버 — 다리를 좌우로 묶는다 (시각 전용)
+        def Cube "cross_a" (prepend apiSchemas = ["MaterialBindingAPI"])
+        {
+            double size = 2
+            float3 xformOp:scale = (0.01, 0.08, 0.01)
+            double3 xformOp:translate = (-0.30, 0, 0.148)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </conveyor/Looks/Aluminum> (bindMaterialAs = "strongerThanDescendants")
+        }
+        def Cube "cross_b" (prepend apiSchemas = ["MaterialBindingAPI"])
+        {
+            double size = 2
+            float3 xformOp:scale = (0.01, 0.08, 0.01)
+            double3 xformOp:translate = (0.24, 0, 0.148)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </conveyor/Looks/Aluminum> (bindMaterialAs = "strongerThanDescendants")
+        }
+
+        # 모터 커버 — 구동단 아래. 사진의 둥근 알루미늄 커버에 해당한다.
+        # 구조 부재가 아니므로 콜라이더를 넣지 않는다.
+        def Cube "motor_cover" (prepend apiSchemas = ["MaterialBindingAPI"])
+        {
+            double size = 2
+            float3 xformOp:scale = (0.056, 0.09, 0.038)
+            double3 xformOp:translate = (0.344, 0, 0.116)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </conveyor/Looks/Aluminum> (bindMaterialAs = "strongerThanDescendants")
+        }
+    }
+}

@@ -49,6 +49,11 @@ class TeleopState:
         self._cam_el = config.CAM_ELEVATION
         self._cam_radius = config.CAM_RADIUS
 
+        # 컨베이어 — 심 스레드가 consume_belt() 로 변경분을 가져간다.
+        self._belt_idx = config.BELT_SPEED_DEFAULT_INDEX
+        self._belt_on = True
+        self._belt_dirty = True
+
         # 영상
         self._frame: bytes | None = None
         self._frame_id = 0
@@ -93,6 +98,17 @@ class TeleopState:
                     self._cam_az = config.CAM_AZIMUTH
                     self._cam_el = config.CAM_ELEVATION
                     self._cam_radius = config.CAM_RADIUS
+            elif code == config.KEY_BELT_TOGGLE:
+                if down and code not in client.pressed:
+                    self._belt_on = not self._belt_on
+                    self._belt_dirty = True
+            elif code in (config.KEY_BELT_SLOWER, config.KEY_BELT_FASTER):
+                if down and code not in client.pressed:
+                    step = -1 if code == config.KEY_BELT_SLOWER else +1
+                    self._belt_idx = max(
+                        0, min(len(config.BELT_SPEED_LEVELS) - 1, self._belt_idx + step)
+                    )
+                    self._belt_dirty = True
             elif code in (config.KEY_SPEED_DOWN, config.KEY_SPEED_UP):
                 if down and code not in client.pressed:
                     step = -1 if code == config.KEY_SPEED_DOWN else +1
@@ -148,6 +164,14 @@ class TeleopState:
             ty + r * math.cos(el) * math.sin(az),
             tz + r * math.sin(el),
         )
+
+    def consume_belt(self) -> tuple[float, bool] | None:
+        """벨트 설정이 바뀌었을 때만 (속도, 켜짐) 을 돌려준다. 아니면 None."""
+        with self._lock:
+            if not self._belt_dirty:
+                return None
+            self._belt_dirty = False
+            return config.BELT_SPEED_LEVELS[self._belt_idx], self._belt_on
 
     def camera_azimuth(self) -> float:
         with self._lock:
@@ -213,6 +237,9 @@ class TeleopState:
             )
             self._telemetry["speed"] = config.SPEED_LEVELS[self._speed_idx]
             self._telemetry["cam_radius"] = round(self._cam_radius, 2)
+            speed = config.BELT_SPEED_LEVELS[self._belt_idx]
+            self._telemetry["belt"] = round(speed, 3) if self._belt_on else 0.0
+            self._telemetry["belt_on"] = self._belt_on
 
     def on_reset_done(self) -> None:
         """리셋 후 그리퍼를 열린 상태로 되돌려 UI와 실제 상태를 맞춘다."""

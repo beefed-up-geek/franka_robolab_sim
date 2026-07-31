@@ -66,6 +66,8 @@
           <tr><td>EEF Z</td><td id="ez">–</td></tr>
           <tr><td>그리퍼</td><td id="grip">–</td></tr>
           <tr><td>배속</td><td id="speed">–</td></tr>
+          <tr><td>컨베이어</td><td id="belt">–</td></tr>
+          <tr><td>블록 순환</td><td id="recyc">–</td></tr>
           <tr><td>카메라 거리</td><td id="camr">–</td></tr>
           <tr><td>스텝</td><td id="step">–</td></tr>
           <tr><td>제어 Hz</td><td id="hz">–</td></tr>
@@ -89,6 +91,8 @@
         <div class="row"><kbd data-k="KeyR">R</kbd><span>에피소드 리셋</span></div>
         <div class="row"><kbd data-k="KeyF">F</kbd><span>시점 초기화</span></div>
         <div class="row"><kbd data-k="BracketLeft">[</kbd><kbd data-k="BracketRight">]</kbd><span>배속 −/+</span></div>
+        <div class="row"><kbd data-k="KeyB">B</kbd><span>컨베이어 정지/가동</span></div>
+        <div class="row"><kbd data-k="Comma">,</kbd><kbd data-k="Period">.</kbd><span>벨트 속도 −/+</span></div>
       </div>
     </aside>
   </div>
@@ -97,7 +101,7 @@
 const CODES = new Set([
   "KeyW","KeyS","KeyA","KeyD","KeyQ","KeyE",
   "KeyZ","KeyX","KeyT","KeyG","KeyC","KeyV",
-  "Space","KeyR","KeyF","BracketLeft","BracketRight",
+  "Space","KeyR","KeyF","BracketLeft","BracketRight","KeyB","Comma","Period",
 ]);
 
 const statusEl = document.getElementById("status");
@@ -163,6 +167,10 @@ function connect() {
     document.getElementById("grip").textContent = m.gripper ?? "–";
     document.getElementById("grip").style.color = m.gripper === "CLOSED" ? "#f87171" : "#4ade80";
     document.getElementById("speed").textContent = m.speed ? m.speed.toFixed(2) + "×" : "–";
+    const beltEl = document.getElementById("belt");
+    beltEl.textContent = typeof m.belt === "number" ? m.belt.toFixed(2) + " m/s" : "–";
+    beltEl.style.color = m.belt_on === false ? "#f87171" : "";
+    document.getElementById("recyc").textContent = m.recycled ?? "–";
     document.getElementById("camr").textContent = m.cam_radius ? m.cam_radius.toFixed(2) + " m" : "–";
     document.getElementById("step").textContent = m.step ?? "–";
     document.getElementById("hz").textContent = typeof m.hz === "number" ? m.hz.toFixed(1) : "–";
