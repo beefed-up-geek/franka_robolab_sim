@@ -56,7 +56,7 @@ SAFE_RADIUS = 0.85         # 베이스로부터의 최대 반경 [m] — 특이�
 CAM_TARGET = (0.50, 0.0, 0.15)      # 궤도 중심 (작업면 중심) [m]
 CAM_AZIMUTH = -2.7869                # 초기 방위각 [rad] — 로봇 뒤 왼쪽
 CAM_ELEVATION = 0.7890                # 초기 고도각 [rad]
-CAM_RADIUS = 2.0433                 # 초기 거리 [m]
+CAM_RADIUS = 2.7000                 # 초기 거리 [m] — 160cm 작업대 전체 + 창고가 보이는 거리
 
 # 고도각을 수직 근처까지 올리면 look-at 의 up 벡터가 특이해져 화면이 뒤집힌다.
 CAM_ELEV_MIN = 0.12

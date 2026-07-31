@@ -13,7 +13,7 @@ RoboLab 이 제공하는 HeadCameraCfg 는 쿼터니언 성분 순서가 어긋�
     카메라 fwd   = (0.65,  0.23, -0.73) → W 키(+X)가 화면 안쪽
                                           Q 키(+Z)가 화면 위쪽
 
-쿼터니언은 (eye=(-0.85, -0.50, 1.60), target=(0.55, 0, 0.02)) 에 대한 look-at
+쿼터니언은 (eye=(-1.28, -0.66, 2.07), target=(0.50, 0, 0.15)) 에 대한 look-at
 결과다. 시점을 바꾸려면 look-at 을 다시 계산해서 rot 을 통째로 갈아끼워야 한다 —
 눈대중으로 성분을 만지면 위 축 대응이 깨진다.
 """
@@ -35,7 +35,7 @@ class TeleopBehindCameraCfg:
         data_types=["rgb"],
         # RoboLab 벤치마크 카메라의 focal_length=2.1 은 수평 화각 104° 라, 2.17m
         # 떨어진 이 위치에서는 테이블이 화면의 27% 밖에 안 된다. 5.5 로 좁히면
-        # 화각 52°, 가시폭 2.12m 로 테이블이 화면의 70% 를 채운다.
+        # 화각 52°, 2.7m 지점 가시폭 2.64m 로 160cm 작업대가 화면의 61% 를 채운다.
         spawn=sim_utils.PinholeCameraCfg(
             focal_length=5.5,
             focus_distance=28.0,
@@ -43,8 +43,8 @@ class TeleopBehindCameraCfg:
             vertical_aperture=3.024,
         ),
         offset=TiledCameraCfg.OffsetCfg(
-            pos=(-0.85, -0.50, 1.60),
-            rot=(0.759868, 0.301279, -0.212317, -0.535493),
+            pos=(-1.2839, -0.6607, 2.0661),
+            rot=(0.758850, 0.312726, -0.217665, -0.528177),
             convention="opengl",
         ),
     )
