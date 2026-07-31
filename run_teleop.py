@@ -42,6 +42,7 @@ app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 """이하 Isaac Sim 기동 후에만 import 가능하다."""
+import math  # noqa: E402
 import torch  # noqa: E402
 from pathlib import Path  # noqa: E402
 
@@ -58,7 +59,6 @@ from robolab.robots.droid import (  # noqa: E402
     ProprioceptionObservationCfg,
     contact_gripper,
 )
-from robolab.variations.backgrounds import HomeOfficeBackgroundCfg  # noqa: E402
 from robolab.variations.camera import (  # noqa: E402
     EgocentricMirroredCameraCfg,
     HeadCameraCfg,
@@ -68,6 +68,7 @@ from robolab.variations.camera import (  # noqa: E402
 from robolab.variations.lighting import SphereLightCfg  # noqa: E402
 
 from franka_teleop import config, safety  # noqa: E402
+from franka_teleop.background import WarehouseBackgroundCfg  # noqa: E402
 from franka_teleop.camera import TeleopBehindCameraCfg  # noqa: E402
 from franka_teleop.state import TeleopState  # noqa: E402
 from franka_teleop.web_server import start_in_thread  # noqa: E402
@@ -111,7 +112,7 @@ def register_env(task: str, camera_cfg) -> None:
         robot_cfg=DroidCfg,
         camera_cfg=[camera_cfg],
         lighting_cfg=SphereLightCfg,
-        background_cfg=HomeOfficeBackgroundCfg,
+        background_cfg=WarehouseBackgroundCfg,
         contact_gripper=contact_gripper,
         dt=1 / (60 * 2),
         render_interval=8,
@@ -150,6 +151,82 @@ def encode_jpeg(image: torch.Tensor, width: int) -> bytes | None:
 
     ok, buffer = cv2.imencode(".jpg", array, [int(cv2.IMWRITE_JPEG_QUALITY), config.STREAM_JPEG_QUALITY])
     return buffer.tobytes() if ok else None
+
+
+def camera_sensor_name(camera_cfg) -> str | None:
+    """카메라 설정 클래스에서 센서 이름(=env.scene 의 키)을 찾아낸다.
+
+    RoboLab 은 설정 클래스의 속성 이름을 그대로 센서 이름으로 쓴다
+    (generate_image_obs_from_cameras 와 같은 규칙).
+    """
+    from isaaclab.sensors import TiledCameraCfg
+
+    instance = camera_cfg()
+    for attr in dir(instance):
+        if attr.startswith("_"):
+            continue
+        if isinstance(getattr(instance, attr, None), TiledCameraCfg):
+            return attr
+    return None
+
+
+def screen_to_world(delta: list[float], azimuth: float) -> list[float]:
+    """화면 기준 이동 델타를 월드 기준으로 돌린다.
+
+    카메라를 궤도로 돌려도 "W 는 화면 안쪽, D 는 화면 오른쪽" 이 유지되게 하려면
+    키 입력을 월드축이 아니라 카메라 방위각 기준으로 해석해야 한다. 안 그러면
+    시점을 180° 돌렸을 때 W 가 화면 앞쪽으로 오는 꼴이 된다.
+
+    방위각 az 는 target→eye 방향이므로 화면 안쪽(eye→target)은 -az 방향이다.
+    """
+    fwd = (-math.cos(azimuth), -math.sin(azimuth))     # 화면 안쪽
+    left = (math.sin(azimuth), -math.cos(azimuth))     # 화면 왼쪽
+    forward_amt, left_amt, up_amt = delta[0], delta[1], delta[2]
+    return [
+        forward_amt * fwd[0] + left_amt * left[0],
+        forward_amt * fwd[1] + left_amt * left[1],
+        up_amt,
+        delta[3], delta[4], delta[5],                  # 회전은 월드 고정
+    ]
+
+
+def log_scene_bounds() -> None:
+    """로드된 스테이지에서 테이블과 창고의 실제 크기·위치를 재서 찍는다.
+
+    손으로 계산한 USD scale 과 시뮬레이터가 실제로 쓰는 값이 어긋나면 바로
+    드러나고, 창고 안에서 작업대를 어디에 놓을지 정할 때도 이 값을 본다.
+    """
+    try:
+        import omni.usd
+        from pxr import Usd, UsdGeom
+
+        stage = omni.usd.get_context().get_stage()
+        wanted = {"table": None, "background": None}
+        for prim in stage.Traverse():
+            name = prim.GetName()
+            if name in wanted and wanted[name] is None:
+                wanted[name] = prim
+            if all(v is not None for v in wanted.values()):
+                break
+
+        for name, prim in wanted.items():
+            if prim is None:
+                print(f"[teleop] '{name}' 프림을 찾지 못했습니다.", flush=True)
+                continue
+            rng = (
+                UsdGeom.Imageable(prim)
+                .ComputeWorldBound(Usd.TimeCode.Default(), UsdGeom.Tokens.default_)
+                .ComputeAlignedRange()
+            )
+            lo, hi, size = rng.GetMin(), rng.GetMax(), rng.GetSize()
+            label = "테이블 상판" if name == "table" else "창고"
+            print(
+                f"[teleop] {label}: X {size[0]:.2f}m Y {size[1]:.2f}m Z {size[2]:.2f}m  "
+                f"범위 X[{lo[0]:.2f},{hi[0]:.2f}] Y[{lo[1]:.2f},{hi[1]:.2f}] Z[{lo[2]:.2f},{hi[2]:.2f}]",
+                flush=True,
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[teleop] 씬 크기 측정 실패: {exc}", flush=True)
 
 
 def reset_episode(env, state, reason: str):
@@ -195,6 +272,15 @@ def main() -> None:
     env, _ = create_env(env_name, num_envs=1, use_fabric=not args_cli.no_fabric)
     print(f"[teleop] use_fabric={not args_cli.no_fabric}", flush=True)
     obs, _ = env.reset()
+    log_scene_bounds()
+
+    # 궤도 카메라용 핸들. 이름을 못 찾으면 시점 고정으로 동작한다.
+    cam_name = camera_sensor_name(camera_cfg)
+    camera = env.scene[cam_name] if cam_name and cam_name in env.scene.keys() else None
+    if camera is None:
+        print(f"[teleop] 경고: 카메라 센서 '{cam_name}' 를 찾지 못해 시점 조작이 비활성화됩니다.", flush=True)
+    cam_target = torch.tensor([config.CAM_TARGET], device=env.device, dtype=torch.float32)
+    last_eye = None
 
     action = torch.zeros(1, 7, device=env.device)
     step = 0
@@ -212,10 +298,21 @@ def main() -> None:
             step = 0
             continue
 
+        # 시점이 바뀐 경우에만 카메라를 옮긴다 — 매 스텝 쓰면 낭비다.
+        if camera is not None:
+            eye = state.camera_eye()
+            if eye != last_eye:
+                camera.set_world_poses_from_view(
+                    torch.tensor([eye], device=env.device, dtype=torch.float32), cam_target
+                )
+                last_eye = eye
+
         proprio = obs.get("proprio_obs", {})
         ee_pos = proprio.get("ee_pos")
 
-        d = torch.tensor(delta, device=env.device, dtype=action.dtype)
+        d = torch.tensor(
+            screen_to_world(delta, state.camera_azimuth()), device=env.device, dtype=action.dtype
+        )
         warn = ""
         if ee_pos is not None:
             # 목표가 작업공간을 벗어나지 않도록 델타를 잘라낸다.

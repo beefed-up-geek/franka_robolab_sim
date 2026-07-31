@@ -6,7 +6,7 @@
 
   GET /        조작 UI (HTML)
   GET /stream  카메라 영상 (multipart MJPEG)
-  GET /ws      키 입력 업링크 + 텔레메트리 다운링크 (WebSocket)
+  GET /ws      키/마우스 입력 업링크 + 텔레메트리 다운링크 (WebSocket)
 
 Isaac Sim이 메인 스레드를 점유하므로 이 서버는 별도 스레드에서 자체 asyncio
 이벤트 루프를 돌린다. 공유 지점은 TeleopState 하나뿐이다.
@@ -14,6 +14,7 @@ Isaac Sim이 메인 스레드를 점유하므로 이 서버는 별도 스레드�
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import logging
 import threading
@@ -27,6 +28,9 @@ from franka_teleop.state import TeleopState
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# 연결마다 고유 id — 키 눌림 상태와 하트비트를 클라이언트별로 관리하기 위한 것이다.
+_next_client_id = itertools.count(1)
 
 
 async def _index(request: web.Request) -> web.Response:
@@ -66,8 +70,9 @@ async def _ws(request: web.Request) -> web.WebSocketResponse:
     state: TeleopState = request.app["state"]
     ws = web.WebSocketResponse(heartbeat=10.0)
     await ws.prepare(request)
-    state.clients += 1
-    logger.info("클라이언트 접속 (현재 %d)", state.clients)
+    client_id = next(_next_client_id)
+    state.add_client(client_id)
+    logger.info("클라이언트 접속 #%d (현재 %d)", client_id, state.client_count)
 
     async def push_telemetry() -> None:
         """10Hz로 EEF 좌표·그리퍼 상태를 UI에 밀어준다."""
@@ -90,19 +95,21 @@ async def _ws(request: web.Request) -> web.WebSocketResponse:
 
             kind = data.get("type")
             if kind == "key":
-                state.on_key(data.get("code", ""), bool(data.get("down")))
+                state.on_key(client_id, data.get("code", ""), bool(data.get("down")))
+            elif kind == "orbit":
+                state.orbit(float(data.get("dx", 0.0)), float(data.get("dy", 0.0)))
+            elif kind == "zoom":
+                state.zoom(float(data.get("d", 0.0)))
             elif kind == "blur":
                 # 브라우저 탭이 포커스를 잃으면 keyup이 안 오므로 즉시 정지시킨다.
-                state.release_all()
+                state.release_all(client_id)
             elif kind == "ping":
-                state.heartbeat()
+                state.heartbeat(client_id)
     finally:
         pusher.cancel()
-        state.clients -= 1
-        # 마지막 클라이언트가 나가면 로봇을 멈춘다.
-        if state.clients <= 0:
-            state.release_all()
-        logger.info("클라이언트 종료 (현재 %d)", state.clients)
+        # 연결이 끊기면 그 클라이언트가 누르고 있던 키도 같이 사라진다.
+        state.remove_client(client_id)
+        logger.info("클라이언트 종료 #%d (현재 %d)", client_id, state.client_count)
     return ws
 
 

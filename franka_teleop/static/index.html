@@ -14,9 +14,18 @@
   }
   h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: .04em; color: #9aa3af; }
   #wrap { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
-  #view { background: #000; border-radius: 8px; border: 1px solid #2a2f38; overflow: hidden; line-height: 0; }
-  #view img { display: block; max-width: min(90vw, 960px); height: auto; }
-  aside { display: flex; flex-direction: column; gap: 12px; min-width: 260px; }
+  #view {
+    position: relative; background: #000; border-radius: 8px; border: 1px solid #2a2f38;
+    overflow: hidden; line-height: 0; cursor: grab; touch-action: none; user-select: none;
+  }
+  #view.dragging { cursor: grabbing; }
+  #view img { display: block; max-width: min(90vw, 960px); height: auto; pointer-events: none; }
+  #hint {
+    position: absolute; left: 10px; bottom: 10px; font-size: 11px; line-height: 1.5;
+    background: rgba(10,12,15,.72); color: #aab2bf; padding: 5px 9px; border-radius: 5px;
+    pointer-events: none; letter-spacing: .02em;
+  }
+  aside { display: flex; flex-direction: column; gap: 12px; width: 262px; }
   .card { background: #1b1e24; border: 1px solid #2a2f38; border-radius: 8px; padding: 12px 14px; }
   .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: #6b7280; margin: 0 0 9px; }
   table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
@@ -37,13 +46,17 @@
   .bad  { background: #38151a; color: #f87171; border: 1px solid #7f2530; }
   .warn { background: #3a2c08; color: #fbbf24; border: 1px solid #7c5a10; }
   #grip { font-weight: 700; }
+
 </style>
 </head>
 <body>
   <h1>FRANKA · ROBOLAB PICK &amp; PLACE 텔레오퍼레이션</h1>
   <div id="status" class="warn">연결 중…</div>
   <div id="wrap">
-    <div id="view"><img id="cam" src="/stream" alt="시뮬레이션 영상"></div>
+    <div id="view">
+      <img id="cam" src="/stream" alt="시뮬레이션 영상">
+      <div id="hint">드래그: 시점 회전 · 휠: 줌 · F: 시점 초기화</div>
+    </div>
     <aside>
       <div class="card">
         <h2>상태</h2>
@@ -53,15 +66,16 @@
           <tr><td>EEF Z</td><td id="ez">–</td></tr>
           <tr><td>그리퍼</td><td id="grip">–</td></tr>
           <tr><td>배속</td><td id="speed">–</td></tr>
+          <tr><td>카메라 거리</td><td id="camr">–</td></tr>
           <tr><td>스텝</td><td id="step">–</td></tr>
           <tr><td>제어 Hz</td><td id="hz">–</td></tr>
         </table>
       </div>
       <div class="card">
-        <h2>이동</h2>
-        <div class="row"><kbd data-k="KeyW">W</kbd><kbd data-k="KeyS">S</kbd><span>앞 / 뒤 (X)</span></div>
-        <div class="row"><kbd data-k="KeyA">A</kbd><kbd data-k="KeyD">D</kbd><span>좌 / 우 (Y)</span></div>
-        <div class="row"><kbd data-k="KeyQ">Q</kbd><kbd data-k="KeyE">E</kbd><span>위 / 아래 (Z)</span></div>
+        <h2>이동 (화면 기준)</h2>
+        <div class="row"><kbd data-k="KeyW">W</kbd><kbd data-k="KeyS">S</kbd><span>안 / 앞</span></div>
+        <div class="row"><kbd data-k="KeyA">A</kbd><kbd data-k="KeyD">D</kbd><span>좌 / 우</span></div>
+        <div class="row"><kbd data-k="KeyQ">Q</kbd><kbd data-k="KeyE">E</kbd><span>위 / 아래</span></div>
       </div>
       <div class="card">
         <h2>회전</h2>
@@ -72,7 +86,8 @@
       <div class="card">
         <h2>동작</h2>
         <div class="row"><kbd data-k="Space">Space</kbd><span>그리퍼 열기/닫기</span></div>
-        <div class="row"><kbd data-k="KeyR">R</kbd><span>씬 리셋</span></div>
+        <div class="row"><kbd data-k="KeyR">R</kbd><span>에피소드 리셋</span></div>
+        <div class="row"><kbd data-k="KeyF">F</kbd><span>시점 초기화</span></div>
         <div class="row"><kbd data-k="BracketLeft">[</kbd><kbd data-k="BracketRight">]</kbd><span>배속 −/+</span></div>
       </div>
     </aside>
@@ -82,24 +97,56 @@
 const CODES = new Set([
   "KeyW","KeyS","KeyA","KeyD","KeyQ","KeyE",
   "KeyZ","KeyX","KeyT","KeyG","KeyC","KeyV",
-  "Space","KeyR","BracketLeft","BracketRight",
+  "Space","KeyR","KeyF","BracketLeft","BracketRight",
 ]);
 
 const statusEl = document.getElementById("status");
+const viewEl = document.getElementById("view");
 const held = new Set();
 let ws = null, alive = false;
 
 function setStatus(text, cls) { statusEl.textContent = text; statusEl.className = cls; }
-
 function paint(code, on) {
   const el = document.querySelector(`kbd[data-k="${code}"]`);
   if (el) el.classList.toggle("on", on);
 }
-
 function send(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
 
+/* ── 시점 조작: 드래그 궤도 + 휠 줌 ────────────────────────── */
+let dragging = false, lastX = 0, lastY = 0;
+
+viewEl.addEventListener("pointerdown", (e) => {
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
+  viewEl.classList.add("dragging");
+  viewEl.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+
+viewEl.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  if (dx || dy) send({ type: "orbit", dx, dy });
+});
+
+const endDrag = (e) => {
+  if (!dragging) return;
+  dragging = false;
+  viewEl.classList.remove("dragging");
+  try { viewEl.releasePointerCapture(e.pointerId); } catch (_) {}
+};
+viewEl.addEventListener("pointerup", endDrag);
+viewEl.addEventListener("pointercancel", endDrag);
+
+// passive:false 라야 preventDefault 로 페이지 스크롤을 막을 수 있다.
+viewEl.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  send({ type: "zoom", d: e.deltaY });
+}, { passive: false });
+
+/* ── WebSocket ─────────────────────────────────────────────── */
 function connect() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   ws = new WebSocket(`${proto}//${location.host}/ws`);
@@ -116,6 +163,7 @@ function connect() {
     document.getElementById("grip").textContent = m.gripper ?? "–";
     document.getElementById("grip").style.color = m.gripper === "CLOSED" ? "#f87171" : "#4ade80";
     document.getElementById("speed").textContent = m.speed ? m.speed.toFixed(2) + "×" : "–";
+    document.getElementById("camr").textContent = m.cam_radius ? m.cam_radius.toFixed(2) + " m" : "–";
     document.getElementById("step").textContent = m.step ?? "–";
     document.getElementById("hz").textContent = typeof m.hz === "number" ? m.hz.toFixed(1) : "–";
     if (m.warn) setStatus(m.warn, "warn");
@@ -133,6 +181,7 @@ function connect() {
   ws.onerror = () => ws.close();
 }
 
+/* ── 키 입력 ───────────────────────────────────────────────── */
 addEventListener("keydown", (e) => {
   if (!CODES.has(e.code)) return;
   e.preventDefault();                 // Space 스크롤 등 기본 동작 차단
