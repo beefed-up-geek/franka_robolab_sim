@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Franka 텔레오퍼레이션</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #14161a; color: #e6e8ec;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 18px;
+  }
+  h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: .04em; color: #9aa3af; }
+  #wrap { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
+  #view { background: #000; border-radius: 8px; border: 1px solid #2a2f38; overflow: hidden; line-height: 0; }
+  #view img { display: block; max-width: min(90vw, 960px); height: auto; }
+  aside { display: flex; flex-direction: column; gap: 12px; min-width: 260px; }
+  .card { background: #1b1e24; border: 1px solid #2a2f38; border-radius: 8px; padding: 12px 14px; }
+  .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: #6b7280; margin: 0 0 9px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  td { padding: 2.5px 0; }
+  td:first-child { color: #8b93a1; padding-right: 12px; white-space: nowrap; }
+  td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  kbd {
+    display: inline-block; min-width: 25px; text-align: center;
+    background: #262b33; border: 1px solid #3a414d; border-bottom-width: 2px;
+    border-radius: 4px; padding: 3px 6px; font-size: 11.5px; margin-right: 5px;
+    transition: background .04s, border-color .04s;
+  }
+  kbd.on { background: #2563eb; border-color: #60a5fa; color: #fff; }
+  .row { display: flex; align-items: center; margin-bottom: 5px; font-size: 12.5px; color: #9aa3af; }
+  .row span { margin-left: auto; }
+  #status { font-size: 12.5px; padding: 7px 12px; border-radius: 6px; text-align: center; letter-spacing: .03em; }
+  .ok   { background: #06331f; color: #4ade80; border: 1px solid #12613a; }
+  .bad  { background: #38151a; color: #f87171; border: 1px solid #7f2530; }
+  .warn { background: #3a2c08; color: #fbbf24; border: 1px solid #7c5a10; }
+  #grip { font-weight: 700; }
+</style>
+</head>
+<body>
+  <h1>FRANKA · ROBOLAB PICK &amp; PLACE 텔레오퍼레이션</h1>
+  <div id="status" class="warn">연결 중…</div>
+  <div id="wrap">
+    <div id="view"><img id="cam" src="/stream" alt="시뮬레이션 영상"></div>
+    <aside>
+      <div class="card">
+        <h2>상태</h2>
+        <table>
+          <tr><td>EEF X</td><td id="ex">–</td></tr>
+          <tr><td>EEF Y</td><td id="ey">–</td></tr>
+          <tr><td>EEF Z</td><td id="ez">–</td></tr>
+          <tr><td>그리퍼</td><td id="grip">–</td></tr>
+          <tr><td>배속</td><td id="speed">–</td></tr>
+          <tr><td>스텝</td><td id="step">–</td></tr>
+          <tr><td>제어 Hz</td><td id="hz">–</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h2>이동</h2>
+        <div class="row"><kbd data-k="KeyW">W</kbd><kbd data-k="KeyS">S</kbd><span>앞 / 뒤 (X)</span></div>
+        <div class="row"><kbd data-k="KeyA">A</kbd><kbd data-k="KeyD">D</kbd><span>좌 / 우 (Y)</span></div>
+        <div class="row"><kbd data-k="KeyQ">Q</kbd><kbd data-k="KeyE">E</kbd><span>위 / 아래 (Z)</span></div>
+      </div>
+      <div class="card">
+        <h2>회전</h2>
+        <div class="row"><kbd data-k="KeyZ">Z</kbd><kbd data-k="KeyX">X</kbd><span>roll ±</span></div>
+        <div class="row"><kbd data-k="KeyT">T</kbd><kbd data-k="KeyG">G</kbd><span>pitch ±</span></div>
+        <div class="row"><kbd data-k="KeyC">C</kbd><kbd data-k="KeyV">V</kbd><span>yaw ±</span></div>
+      </div>
+      <div class="card">
+        <h2>동작</h2>
+        <div class="row"><kbd data-k="Space">Space</kbd><span>그리퍼 열기/닫기</span></div>
+        <div class="row"><kbd data-k="KeyR">R</kbd><span>씬 리셋</span></div>
+        <div class="row"><kbd data-k="BracketLeft">[</kbd><kbd data-k="BracketRight">]</kbd><span>배속 −/+</span></div>
+      </div>
+    </aside>
+  </div>
+
+<script>
+const CODES = new Set([
+  "KeyW","KeyS","KeyA","KeyD","KeyQ","KeyE",
+  "KeyZ","KeyX","KeyT","KeyG","KeyC","KeyV",
+  "Space","KeyR","BracketLeft","BracketRight",
+]);
+
+const statusEl = document.getElementById("status");
+const held = new Set();
+let ws = null, alive = false;
+
+function setStatus(text, cls) { statusEl.textContent = text; statusEl.className = cls; }
+
+function paint(code, on) {
+  const el = document.querySelector(`kbd[data-k="${code}"]`);
+  if (el) el.classList.toggle("on", on);
+}
+
+function send(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => { alive = true; setStatus("연결됨 — 이 창을 클릭하고 키를 누르세요", "ok"); };
+
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.type !== "telemetry") return;
+    const f = (v) => (typeof v === "number" ? v.toFixed(3) : "–");
+    document.getElementById("ex").textContent = f(m.ee_x);
+    document.getElementById("ey").textContent = f(m.ee_y);
+    document.getElementById("ez").textContent = f(m.ee_z);
+    document.getElementById("grip").textContent = m.gripper ?? "–";
+    document.getElementById("grip").style.color = m.gripper === "CLOSED" ? "#f87171" : "#4ade80";
+    document.getElementById("speed").textContent = m.speed ? m.speed.toFixed(2) + "×" : "–";
+    document.getElementById("step").textContent = m.step ?? "–";
+    document.getElementById("hz").textContent = typeof m.hz === "number" ? m.hz.toFixed(1) : "–";
+    if (m.warn) setStatus(m.warn, "warn");
+    else if (alive) setStatus("연결됨 — 이 창을 클릭하고 키를 누르세요", "ok");
+  };
+
+  const dropped = () => {
+    alive = false;
+    held.forEach((c) => paint(c, false));
+    held.clear();
+    setStatus("연결 끊김 — 재접속 중…", "bad");
+    setTimeout(connect, 1200);
+  };
+  ws.onclose = dropped;
+  ws.onerror = () => ws.close();
+}
+
+addEventListener("keydown", (e) => {
+  if (!CODES.has(e.code)) return;
+  e.preventDefault();                 // Space 스크롤 등 기본 동작 차단
+  if (e.repeat || held.has(e.code)) return;   // 키 반복은 무시 (눌림 상태만 관리)
+  held.add(e.code);
+  paint(e.code, true);
+  send({ type: "key", code: e.code, down: true });
+});
+
+addEventListener("keyup", (e) => {
+  if (!CODES.has(e.code)) return;
+  e.preventDefault();
+  held.delete(e.code);
+  paint(e.code, false);
+  send({ type: "key", code: e.code, down: false });
+});
+
+// 탭을 벗어나면 keyup이 도착하지 않아 로봇이 계속 움직인다 — 즉시 정지시킨다.
+addEventListener("blur", () => {
+  held.forEach((c) => paint(c, false));
+  held.clear();
+  send({ type: "blur" });
+});
+
+// 서버가 입력 두절을 감지해 정지시키는 것을 막는 하트비트.
+setInterval(() => send({ type: "ping" }), 200);
+
+// 스트림이 끊기면 <img>를 다시 물린다.
+document.getElementById("cam").addEventListener("error", () => {
+  setTimeout(() => { document.getElementById("cam").src = "/stream?t=" + Date.now(); }, 1000);
+});
+
+connect();
+</script>
+</body>
+</html>

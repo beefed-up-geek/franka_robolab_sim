@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+logs/
+outputs/
+output/
+.cache/
+
+# macOS
+.DS_Store
+._*
