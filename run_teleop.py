@@ -24,6 +24,21 @@ parser = argparse.ArgumentParser(description="Franka 웹 키보드 텔레오퍼�
 parser.add_argument("--task", type=str, default="ConveyorPickPlaceTask")
 parser.add_argument("--stream-width", type=int, default=960, help="브라우저로 보낼 영상 가로 폭 [px]")
 parser.add_argument(
+    "--physics-device",
+    type=str,
+    default="cpu",
+    help="물리 연산 디바이스. PhysX 표면 속도(컨베이어)는 CPU 물리에서만 동작한다. "
+         "환경이 1개뿐이라 CPU 로도 충분하다.",
+)
+parser.add_argument(
+    "--conveyor",
+    type=str,
+    default="script",
+    choices=["script", "surface"],
+    help="script=벨트에 얹힌 강체를 매 스텝 전진(기본). "
+         "surface=PhysX 표면 속도 — 이 구성에서는 콜라이더가 깨져 동작하지 않는다.",
+)
+parser.add_argument(
     "--no-fabric",
     action="store_true",
     help="USD Fabric(flatcache) 비활성화. 리셋 후 관측이 stale 해지는 문제 진단용.",
@@ -270,15 +285,27 @@ def main() -> None:
     state = TeleopState()
     start_in_thread(state)
 
-    env, _ = create_env(env_name, num_envs=1, use_fabric=not args_cli.no_fabric)
-    print(f"[teleop] use_fabric={not args_cli.no_fabric}", flush=True)
+    # Fabric 은 CPU 물리에서도 켜 두어야 한다. 껐더니 write_root_pose_to_sim 으로
+    # 쓴 위치가 렌더러에 전달되지 않아서, 물리 상태는 움직이는데 화면은 그대로인
+    # 상태가 됐다(계측 숫자만 보고 동작한다고 착각하기 쉬운 함정이다).
+    use_fabric = not args_cli.no_fabric
+    env, _ = create_env(
+        env_name, device=args_cli.physics_device, num_envs=1, use_fabric=use_fabric
+    )
+    print(f"[teleop] 물리={args_cli.physics_device} use_fabric={use_fabric} "
+          f"컨베이어={args_cli.conveyor}", flush=True)
     obs, _ = env.reset()
     log_scene_bounds()
 
-    belt = Conveyor(env, config.BELT_SPEED_LEVELS[config.BELT_SPEED_DEFAULT_INDEX])
+    belt = Conveyor(
+        env,
+        config.BELT_SPEED_LEVELS[config.BELT_SPEED_DEFAULT_INDEX],
+        mode=args_cli.conveyor,
+    )
     if belt.ready:
-        print(f"[teleop] 컨베이어 준비 — 블록 {belt.block_count}개, "
-              f"초기 속도 {belt.speed:.2f} m/s", flush=True)
+        print(f"[teleop] 컨베이어 준비 — 반송 대상 강체 {belt.item_count}개"
+              f"(그중 순환 블록 {belt.block_count}개), 초기 속도 {belt.speed:.2f} m/s",
+              flush=True)
     else:
         print("[teleop] 경고: 반송면 또는 블록을 찾지 못해 컨베이어가 동작하지 않습니다.", flush=True)
 
@@ -311,7 +338,7 @@ def main() -> None:
         belt_change = state.consume_belt()
         if belt_change is not None:
             speed, on = belt_change
-            belt.enabled = on
+            belt.set_enabled(on)
             belt.set_speed(speed)
 
         # 벨트에 얹힌 블록을 밀어 준다. env.step() 직전에 써야 이번 스텝에 반영된다.

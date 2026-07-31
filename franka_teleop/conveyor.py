@@ -53,17 +53,27 @@ INLET_Y = -0.36        # 블록이 들어오는 쪽
 OUTLET_Y = 0.36        # 이 지점을 넘으면 회수한다
 BLOCK_HALF = 0.0225    # 45mm 정육면체의 절반
 
-# 블록이 벨트에 "얹혀 있다" 고 볼 범위.
-REST_Z = BELT_TOP_Z + BLOCK_HALF     # 얹혔을 때의 중심 높이
-REST_Z_TOL = 0.012                   # 이보다 들리면 구동 대상에서 제외
+# 순환에서 빼 둘 물체. 벨트에 올릴 일이 없는 고정물(담는 그릇 등)을 적는다.
+# 그 외에는 벨트 위에서 출구를 지나면 무엇이든 입구로 되돌린다.
+NO_RECIRCULATE = frozenset({"bowl"})
+
+# 물체가 벨트에 "얹혀 있다" 고 볼 범위. 물체마다 높이가 다르므로 기준 높이는
+# 실측한 반높이로 물체별로 계산한다.
+REST_Z = BELT_TOP_Z + BLOCK_HALF     # 블록 기준 (회수 위치 계산용)
+REST_Z_TOL = 0.015                   # 이보다 들리면 구동 대상에서 제외
 ON_BELT_DX = 0.09                    # 벨트 폭 방향 허용치
 
 # 입구에 블록이 겹쳐 쌓이지 않도록, 이 거리 안에 다른 블록이 있으면 투입을 미룬다.
 INLET_CLEARANCE = 0.11
 
-# 테이블 아래로 완전히 떨어진 블록만 회수한다. 상판 근처를 기준으로 삼으면
-# 그릇에 담아 둔 블록까지 입구로 끌려간다.
+# 테이블 아래로 완전히 떨어진 물체는 어디에 있든 회수한다.
 FALLEN_Z = -0.10
+
+# 출구 너머 회수 판정 범위. X 는 벨트 연장선에서 크게 벗어나지 않아야 하고
+# (그릇에 담긴 블록을 건드리지 않으려면 좁아야 한다), Z 는 로봇이 들어 올린
+# 상태를 걸러내는 용도다.
+RECOVER_DX = 0.13
+RECOVER_DZ = 0.08
 
 # 벨트 위에서 옆으로 흐르거나 구르는 것을 줄이는 감쇠 (1.0 이면 감쇠 없음)
 LATERAL_DAMPING = 0.3
@@ -73,22 +83,62 @@ ANGULAR_DAMPING = 0.4
 class Conveyor:
     """벨트 위 블록을 구동하고, 출구를 지난 블록을 입구로 되돌린다."""
 
-    def __init__(self, env, speed: float) -> None:
+    def __init__(self, env, speed: float, mode: str = "surface") -> None:
         self.env = env
         self.speed = speed
         self.enabled = True
+        self.mode = mode
+        self._surface_apis: list = []
 
         # env.scene 에는 블록 강체뿐 아니라 접촉 센서도 들어 있고, 센서 이름이
         # "block_0__block_1" 처럼 같은 접두사로 시작한다. 이름만 보고 고르면
         # 센서가 섞여 들어와 root_pos_w 를 읽다 죽는다. 타입으로 걸러야 한다.
         from isaaclab.assets import RigidObject
 
-        self._blocks: list[str] = sorted(
+        # 벨트에 얹히면 **무엇이든** 실어 나른다. 블록만 골라내면 나중에 다른 물체를
+        # 올렸을 때 가만히 있어서 컨베이어가 아니게 된다.
+        self._items: list[str] = sorted(
             name
             for name in env.scene.keys()
-            if name.startswith("block_") and isinstance(env.scene[name], RigidObject)
+            if isinstance(env.scene[name], RigidObject)
         )
+        # 회수 대상 — 고정물만 뺀다. 실제 회수는 "벨트 위에서 출구를 지났을 때"
+        # 만 일어나므로, 로봇이 집어 다른 곳에 둔 물체는 저절로 대상에서 빠진다.
+        self._blocks: list[str] = [n for n in self._items if n not in NO_RECIRCULATE]
+        self._half_height: dict[str, float] = self._measure_half_heights()
         self._belt_found = self._check_belt()
+        if self.mode == "surface":
+            self._apply_surface_velocity()
+
+    def _measure_half_heights(self) -> dict[str, float]:
+        """각 물체의 반높이를 스테이지에서 재 둔다.
+
+        "벨트에 얹혀 있다" 를 판정하려면 물체 중심이 반송면에서 얼마나 위에 있어야
+        하는지 알아야 하는데, 그 값은 물체 높이에 따라 다르다. 블록 크기를 상수로
+        박아 두면 다른 물체를 올렸을 때 판정이 어긋난다.
+        """
+        result: dict[str, float] = {}
+        try:
+            import omni.usd
+            from pxr import Usd, UsdGeom
+        except ImportError:
+            return result
+
+        stage = omni.usd.get_context().get_stage()
+        wanted = set(self._items)
+        for prim in stage.Traverse():
+            name = prim.GetName()
+            if name not in wanted or name in result:
+                continue
+            rng = (
+                UsdGeom.Imageable(prim)
+                .ComputeWorldBound(Usd.TimeCode.Default(), UsdGeom.Tokens.default_)
+                .ComputeAlignedRange()
+            )
+            if rng.IsEmpty():
+                continue
+            result[name] = float(rng.GetSize()[2]) / 2.0
+        return result
 
     # ── 벨트 ────────────────────────────────────────────────────────────
     def _check_belt(self) -> bool:
@@ -123,28 +173,86 @@ class Conveyor:
         print(f"[belt] '{BELT_PRIM_NAME}' 프림을 찾지 못했습니다.", flush=True)
         return False
 
+    def _apply_surface_velocity(self) -> None:
+        """반송면에 PhysX 표면 속도를 건다.
+
+        정석이자 유일하게 "아무 물체나" 실어 나르는 방식이다. 마찰을 통해 전달되므로
+        벨트에 닿기만 하면 블록이든 그릇이든 똑같이 움직인다. 대신 전제가 두 가지다 —
+        벨트가 **키네마틱 강체**여야 하고, 물리가 **CPU** 여야 한다.
+        """
+        try:
+            import omni.usd
+            from pxr import Gf, PhysxSchema
+        except ImportError:
+            return
+
+        stage = omni.usd.get_context().get_stage()
+        for prim in stage.Traverse():
+            if prim.GetName() != BELT_PRIM_NAME:
+                continue
+            api = PhysxSchema.PhysxSurfaceVelocityAPI.Apply(prim)
+            api.CreateSurfaceVelocityEnabledAttr(True)
+            # 로컬 좌표로 줘야 컨베이어를 씬에서 어떻게 돌려 놓든 로컬 +X 가
+            # 진행 방향이 된다.
+            api.CreateSurfaceVelocityLocalSpaceAttr(True)
+            api.CreateSurfaceVelocityAttr(Gf.Vec3f(0.0, 0.0, 0.0))
+            self._surface_apis.append(api)
+        self._push_surface_speed()
+
+    def _push_surface_speed(self) -> None:
+        from pxr import Gf
+
+        value = self.speed if self.enabled else 0.0
+        for api in self._surface_apis:
+            api.GetSurfaceVelocityAttr().Set(Gf.Vec3f(value, 0.0, 0.0))
+
     def set_speed(self, speed: float) -> None:
         self.speed = speed
+        if self.mode == "surface":
+            self._push_surface_speed()
+
+    def set_enabled(self, on: bool) -> None:
+        self.enabled = on
+        if self.mode == "surface":
+            self._push_surface_speed()
 
     @property
     def ready(self) -> bool:
+        if self.mode == "surface":
+            return self._belt_found and bool(self._surface_apis)
         return self._belt_found and bool(self._blocks)
 
     @property
     def block_count(self) -> int:
         return len(self._blocks)
 
+    @property
+    def item_count(self) -> int:
+        """벨트가 실어 나를 수 있는 물체 수 (씬의 모든 강체)."""
+        return len(self._items)
+
     # ── 구동 ────────────────────────────────────────────────────────────
-    def _on_belt(self, x: float, y: float, z: float) -> bool:
+    def _on_belt(self, name: str, x: float, y: float, z: float) -> bool:
+        """이 물체가 지금 반송면에 얹혀 있는가.
+
+        물체를 집어 올리면 z 가 이 범위를 벗어나므로 구동 대상에서 자동으로 빠진다 —
+        그리퍼와 벨트가 서로 싸우지 않는 것도 이 판정 덕분이다.
+        """
+        rest_z = BELT_TOP_Z + self._half_height.get(name, BLOCK_HALF)
         return (
             abs(x - BELT_X) < ON_BELT_DX
             and INLET_Y - 0.06 < y < OUTLET_Y + 0.06
-            and abs(z - REST_Z) < REST_Z_TOL
+            and abs(z - rest_z) < REST_Z_TOL
         )
 
     def drive(self) -> int:
-        """벨트에 얹힌 블록을 이번 스텝만큼 전진시킨다. 구동한 개수를 반환."""
-        if not self.enabled or not self._blocks:
+        """스크립트 모드에서만 — 벨트에 얹힌 블록을 이번 스텝만큼 전진시킨다.
+
+        표면 속도 모드에서는 PhysX 가 알아서 하므로 아무 것도 하지 않는다.
+        """
+        if self.mode != "script":
+            return 0
+        if not self.enabled or not self._items:
             return 0
 
         origin = self.env.scene.env_origins[0]
@@ -153,18 +261,19 @@ class Conveyor:
         advance = self.speed * dt
         driven = 0
 
-        for name in self._blocks:
+        for name in self._items:
             obj = self.env.scene[name]
             pos = obj.data.root_pos_w[0] - origin
             x, y, z = float(pos[0]), float(pos[1]), float(pos[2])
-            if not self._on_belt(x, y, z):
+            if not self._on_belt(name, x, y, z):
                 continue
 
             # 벨트 위에서는 X·Z 를 고정해 옆으로 흐르거나 가라앉지 않게 한다.
+            rest_z = BELT_TOP_Z + self._half_height.get(name, BLOCK_HALF)
             pose = torch.zeros((1, 7), device=device)
             pose[0, 0] = BELT_X + origin[0]
             pose[0, 1] = y + advance + origin[1]
-            pose[0, 2] = REST_Z + origin[2]
+            pose[0, 2] = rest_z + origin[2]
             pose[0, 3:7] = obj.data.root_quat_w[0]   # 자세는 그대로 둔다
             obj.write_root_pose_to_sim(pose)
 
@@ -177,6 +286,7 @@ class Conveyor:
 
     # ── 블록 순환 ───────────────────────────────────────────────────────
     def _positions(self) -> dict[str, torch.Tensor]:
+        """순환 대상(블록)의 위치. 구동은 self._items 전체를 본다."""
         origin = self.env.scene.env_origins[0]
         return {
             name: self.env.scene[name].data.root_pos_w[0] - origin
@@ -191,16 +301,34 @@ class Conveyor:
         """
         origin = self.env.scene.env_origins[0]
         on_belt, ys, zs, vys = 0, [], [], []
-        for name in self._blocks:
+        for name in (n for n in self._blocks if n.startswith("block_")):
             obj = self.env.scene[name]
             pos = obj.data.root_pos_w[0] - origin
             x, y, z = float(pos[0]), float(pos[1]), float(pos[2])
             ys.append(round(y, 3))
             zs.append(round(z, 3))
             vys.append(round(float(obj.data.root_vel_w[0, 1]), 4))
-            if self._on_belt(x, y, z):
+            if self._on_belt(name, x, y, z):
                 on_belt += 1
-        return {"on_belt": on_belt, "block_y": ys, "block_z": zs, "block_vy": vys}
+        # 블록이 아닌 물체도 실려 가는지 확인하기 위한 계측.
+        origin2 = self.env.scene.env_origins[0]
+        others = {}
+        items_on_belt = 0
+        for name in self._items:
+            pos = self.env.scene[name].data.root_pos_w[0] - origin2
+            x, y, z = float(pos[0]), float(pos[1]), float(pos[2])
+            if self._on_belt(name, x, y, z):
+                items_on_belt += 1
+            if not name.startswith("block_"):
+                others[name] = [round(y, 3), round(z, 3)]
+        return {
+            "on_belt": on_belt,
+            "block_y": ys,
+            "block_z": zs,
+            "block_vy": vys,
+            "items_on_belt": items_on_belt,
+            "others": others,
+        }
 
     def recycle(self) -> int:
         """출구를 지났거나 떨어진 블록을 입구로 되돌린다. 되돌린 개수를 반환."""
@@ -212,9 +340,18 @@ class Conveyor:
 
         for name, pos in positions.items():
             x, y, z = float(pos[0]), float(pos[1]), float(pos[2])
-            # 반드시 벨트 위에 있을 때만 출구로 친다. 로봇이 블록을 집어 출구
-            # 너머로 옮기는 중에 회수되면 그리퍼에서 블록이 사라진다.
-            past_outlet = self._on_belt(x, y, z) and y > OUTLET_Y
+            # 출구를 지난 화물을 회수한다. "벨트에 얹혀 있을 때" 로만 좁히면
+            # 둥근 물체가 끝에서 굴러떨어졌을 때 테이블에 그대로 방치된다
+            # (원기둥으로 확인). 그래서 벨트 연장선상에서 낮은 높이에 있으면
+            # 벨트 위든 떨어졌든 모두 회수 대상으로 본다.
+            #
+            # X 범위를 좁게 잡는 것이 중요하다. 넓히면 그릇에 담아 둔 블록까지
+            # 출구 너머로 판정되어 입구로 끌려가 버린다.
+            past_outlet = (
+                y > OUTLET_Y
+                and abs(x - BELT_X) < RECOVER_DX
+                and z < BELT_TOP_Z + RECOVER_DZ   # 로봇이 들어 올린 중이면 제외
+            )
             fallen = z < FALLEN_Z
             if not (past_outlet or fallen):
                 continue

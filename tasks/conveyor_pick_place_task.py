@@ -24,9 +24,15 @@ SCENE_PATH = str(
 
 BLOCKS = [f"block_{i}" for i in range(6)]
 
+# 벨트에 실릴 수 있는 물체는 모두 여기에 있어야 한다.
+# import_scene 이 이 목록에 있는 프림만 씬 엔티티로 만들기 때문에, 여기 빠진
+# 물체는 씬에 그려지기만 하고 컨베이어가 손댈 수 없다.
+# (can_a 는 "블록이 아닌 물체도 실리는가" 를 확인하려고 둔 원기둥이다)
+CARGO = [*BLOCKS, "can_a"]
+
 # "table" 은 반드시 있어야 한다 — RoboLab 의 접촉 프레디킷이 gripper__table
 # 센서를 이름으로 찾는다.
-CONTACT_OBJECTS = [*BLOCKS, "bowl", "table"]
+CONTACT_OBJECTS = [*CARGO, "bowl", "table"]
 
 
 @configclass

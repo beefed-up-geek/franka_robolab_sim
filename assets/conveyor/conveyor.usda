@@ -64,18 +64,16 @@ def Xform "conveyor"
         }
     }
 
-    # 마찰을 아주 낮게 잡는다. 반송은 PhysX 마찰이 아니라 franka_teleop/conveyor.py
-    # 가 매 스텝 블록 속도를 직접 써서 만들기 때문에(표면 속도 API 를 못 쓰는 이유는
-    # 그쪽 모듈 설명 참고), 마찰이 높으면 그 속도를 곧바로 제동해 버린다.
-    # min 으로 합성해 블록 쪽 마찰이 높아도 벨트 위에서는 잘 미끄러지게 한다.
+    # 반송은 conveyor.py 가 위치를 써서 만들므로 마찰이 반송력을 좌우하지는 않는다.
+    # 다만 로봇이 벨트 위 물체를 집을 때 미끄러지지 않도록 적당히 남겨 둔다.
     def Material "BeltPhysics" (
         prepend apiSchemas = ["PhysicsMaterialAPI", "PhysxMaterialAPI"]
     )
     {
-        float physics:dynamicFriction = 0.02
-        float physics:staticFriction = 0.02
+        float physics:dynamicFriction = 0.6
+        float physics:staticFriction = 0.8
         float physics:restitution = 0
-        uniform token physxMaterial:frictionCombineMode = "min"
+        uniform token physxMaterial:frictionCombineMode = "max"
     }
 
     # ── 벨트 ────────────────────────────────────────────────────────────
