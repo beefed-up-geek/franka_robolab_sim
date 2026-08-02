@@ -19,7 +19,7 @@ from robolab.core.scenes.utils import import_scene
 from robolab.core.task.task import Task
 
 SCENE_PATH = str(
-    Path(__file__).resolve().parents[1] / "assets" / "scenes" / "conveyor_pick_place.usda"
+    Path(__file__).resolve().parents[2] / "asset" / "scenes" / "conveyor_pick_place.usda"
 )
 
 BLOCKS = [f"block_{i}" for i in range(6)]

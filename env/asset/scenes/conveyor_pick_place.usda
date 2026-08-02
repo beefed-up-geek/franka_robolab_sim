@@ -10,7 +10,7 @@
     반송면 높이는 테이블 위 0.20 이다.
 
     블록 6개는 벨트 위에 일정 간격으로 놓인다. 출구를 지나면
-    franka_teleop/conveyor.py 가 입구로 되돌려 계속 흐르게 한다.
+    franka_env/conveyor.py 가 입구로 되돌려 계속 흐르게 한다.
 
     payload 경로는 모두 이 저장소 안(../objects, ../conveyor)을 가리킨다.
     예전처럼 robolab 마운트 위치에 기대지 않는다.
@@ -245,7 +245,7 @@ def Xform "world"
     # 컨베이어는 여기서 payload 로 붙이지 않는다. RoboLab 이 씬 USD 를 통째로
     # AssetBaseCfg 로 스폰하는데, **payload 안의 콜라이더는 PhysX 에 등록되지
     # 않아** 블록이 그대로 통과했다 (정적/키네마틱 모두 실패, 인라인 콜라이더만
-    # 동작). 그래서 컨베이어는 franka_teleop/world_assets.py 에서 별도 씬
+    # 동작). 그래서 컨베이어는 franka_env/world_assets.py 에서 별도 씬
     # 엔티티로 스폰한다 — 배치 좌표도 그쪽에 있다.
 
     # -- 담을 그릇 -------------------------------------------------------

@@ -7,8 +7,8 @@ FROM ${ROBOLAB_IMAGE}
 RUN /workspace/isaaclab/_isaac_sim/python.sh -m pip install --no-cache-dir aiohttp
 
 # 이 저장소는 런타임에 볼륨으로 붙는다 (scripts/container_up.sh 참고).
-# 베이스 이미지에 PYTHONPATH 가 없으므로 이어붙이지 않고 그냥 설정한다.
-ENV PYTHONPATH=/workspace/franka_robolab_sim
+# env/src 를 넣어야 franka_env 와 tasks 를 import 할 수 있다.
+ENV PYTHONPATH=/workspace/franka_robolab_sim/env/src
 ENV OMNI_KIT_ACCEPT_EULA=YES
 ENV ACCEPT_EULA=Y
 WORKDIR /workspace/franka_robolab_sim

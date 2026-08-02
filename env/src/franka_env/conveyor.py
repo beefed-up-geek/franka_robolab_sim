@@ -65,10 +65,10 @@ from __future__ import annotations
 
 import torch
 
-# 벨트 콜라이더 프림 이름 (assets/conveyor/conveyor.usda)
+# 벨트 콜라이더 프림 이름 (env/asset/conveyor/conveyor.usda)
 BELT_PRIM_NAME = "belt_surface"
 
-# 씬 배치 기준 — franka_teleop/world_assets.py 의 컨베이어 배치와 맞물린다.
+# 씬 배치 기준 — franka_env/world_assets.py 의 컨베이어 배치와 맞물린다.
 BELT_X = 0.52          # 벨트 중심의 월드 X
 BELT_TOP_Z = 0.200     # 반송면 높이
 INLET_Y = -0.36        # 블록이 들어오는 쪽

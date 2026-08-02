@@ -19,7 +19,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from franka_teleop import config
+from franka_env import config
 
 
 @dataclass

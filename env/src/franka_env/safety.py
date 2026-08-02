@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import torch
 
-from franka_teleop import config
+from franka_env import config
 
 
 def clamp_delta(ee_pos: torch.Tensor, delta_pos: torch.Tensor) -> torch.Tensor:

@@ -17,8 +17,9 @@ fi
 [ -d "$ROBOLAB_DIR" ] || { echo "✗ RoboLab 저장소가 없습니다: $ROBOLAB_DIR"; exit 1; }
 mkdir -p "$HOME/.cache/ov" "$HOME/.cache/kit" "$REPO_DIR/logs"
 
-# 두 저장소는 반드시 /workspace 아래 형제로 마운트한다 —
-# assets/scenes/*.usda 의 payload 상대경로(../../../robolab/...)가 이 배치에 의존한다.
+# RoboLab 은 로봇 설정과 파이썬 패키지 때문에 필요하다.
+# 씬 자산은 이 저장소의 env/asset 안에 자립적으로 들어 있어 마운트 배치에
+# 의존하지 않는다.
 docker run -d -it --name $C \
     --runtime nvidia --gpus all \
     --net host \

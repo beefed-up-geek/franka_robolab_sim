@@ -22,8 +22,8 @@ from pathlib import Path
 
 from aiohttp import WSMsgType, web
 
-from franka_teleop import config
-from franka_teleop.state import TeleopState
+from franka_env import config
+from franka_env.state import TeleopState
 
 logger = logging.getLogger(__name__)
 

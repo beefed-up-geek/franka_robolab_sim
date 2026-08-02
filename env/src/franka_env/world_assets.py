@@ -47,7 +47,7 @@ WAREHOUSE_OFFSET = (0.0, 0.0, GROUND_Z)
 
 # 컨베이어 배치 — 길이(800)가 월드 Y 를 향하도록 Z 축으로 90도 돌린다.
 # 결과: Y [-0.40, 0.40], X [0.42, 0.62], 반송면 z=0.20
-CONVEYOR_USD = str(Path(__file__).resolve().parents[1] / "assets" / "conveyor" / "conveyor.usda")
+CONVEYOR_USD = str(Path(__file__).resolve().parents[2] / "asset" / "conveyor" / "conveyor.usda")
 CONVEYOR_POS = (0.52, 0.0, 0.0)
 CONVEYOR_ROT = (0.7071068, 0.0, 0.0, 0.7071068)
 

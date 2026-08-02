@@ -12,11 +12,11 @@
 
     반송 동작은 belt_surface 프림에 PhysX 표면 속도(PhysxSurfaceVelocityAPI)를
     걸어서 만든다. USDA 에는 콜라이더만 두고, 속도는 실행 중에 바꿀 수 있도록
-    franka_teleop/conveyor.py 가 파이썬에서 적용한다.
+    franka_env/conveyor.py 가 파이썬에서 적용한다.
 
     물리 주의 — 이 파일을 씬 USD 안에 payload/reference 로 붙이면 콜라이더가
     PhysX 에 등록되지 않는다(정적·키네마틱 모두 실패를 확인했다). 반드시
-    franka_teleop/world_assets.py 처럼 **독립 씬 엔티티**로 스폰해야 한다.
+    franka_env/world_assets.py 처럼 **독립 씬 엔티티**로 스폰해야 한다.
     """
     defaultPrim = "conveyor"
     metersPerUnit = 1
@@ -77,7 +77,7 @@ def Xform "conveyor"
     }
 
     # ── 벨트 ────────────────────────────────────────────────────────────
-    # 실제로 물체를 실어 나르는 프림. 이름을 바꾸면 franka_teleop/conveyor.py
+    # 실제로 물체를 실어 나르는 프림. 이름을 바꾸면 franka_env/conveyor.py
     # 의 탐색이 실패하므로 그대로 둘 것.
     #
     # 두 번 헤맨 자리다.

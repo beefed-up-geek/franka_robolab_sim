@@ -1,102 +1,65 @@
 # SPDX-License-Identifier: Apache-2.0
-"""브라우저 키보드로 Franka EEF 를 움직이는 텔레오퍼레이션 러너.
+"""시뮬레이션 메인 루프.
+
+Isaac Sim(Kit)은 `AppLauncher` 로 앱을 띄운 **뒤에야** isaaclab/robolab 모듈을
+import 할 수 있다. 그래서 역할을 둘로 나눴다.
+
+  env/script/*.py   인자를 읽고 앱을 띄운다 (환경마다 하나씩)
+  이 모듈           앱이 뜬 뒤 import 되어 환경을 구성하고 루프를 돈다
+
+환경을 새로 만들 때는 env/script 에 스크립트를 하나 더 두고 `run()` 에 넘길 인자만
+바꾸면 된다 — 이 모듈은 건드릴 필요가 없다.
 
   브라우저(:8003) ──키입력──▶ TeleopState ──7차원 액션──▶ RoboLab env.step()
                   ◀──MJPEG──── 카메라 렌더 ◀─────────────┘
 
 액션은 RoboLab 의 DroidRelIKActionCfg(상대 IK)를 그대로 쓴다. Isaac Lab 의
 DifferentialIKController(DLS)가 IK 를 풀어주므로 MoveIt 같은 외부 IK 는 쓰지 않는다.
-
-실행:
-    /workspace/isaaclab/_isaac_sim/python.sh run_teleop.py --headless
 """
 # isort: skip_file
-import argparse
-import cv2  # isaaclab 보다 먼저 import 해야 한다. 지우지 말 것.
-import logging
-import sys
+from __future__ import annotations
+
+import math
 import time
 import traceback
+from pathlib import Path
 
-from isaaclab.app import AppLauncher
+import cv2
+import torch
 
-parser = argparse.ArgumentParser(description="Franka 웹 키보드 텔레오퍼레이션")
-parser.add_argument("--task", type=str, default="ConveyorPickPlaceTask")
-parser.add_argument("--stream-width", type=int, default=960, help="브라우저로 보낼 영상 가로 폭 [px]")
-parser.add_argument(
-    "--physics-device",
-    type=str,
-    default="cpu",
-    help="물리 연산 디바이스. PhysX 표면 속도(컨베이어)는 CPU 물리에서만 동작한다. "
-         "환경이 1개뿐이라 CPU 로도 충분하다.",
-)
-parser.add_argument(
-    "--conveyor",
-    type=str,
-    default="script",
-    choices=["script", "force", "surface"],
-    help="script=위치를 직접 전진(기본, 이 환경에서 유일하게 동작). "
-         "force=외력으로 마찰 흉내 — 외력이 반영되지 않아 동작하지 않는다. "
-         "surface=PhysX 표면 속도 — 콜라이더가 깨져 동작하지 않는다.",
-)
-parser.add_argument(
-    "--no-fabric",
-    action="store_true",
-    help="USD Fabric(flatcache) 비활성화. 리셋 후 관측이 stale 해지는 문제 진단용.",
-)
-parser.add_argument(
-    "--camera",
-    type=str,
-    default="behind",
-    choices=["behind", "head", "over_shoulder_left", "over_shoulder_right", "egocentric"],
-    help="브라우저로 보낼 시점. 기본값 behind 만 키 방향과 화면 방향이 일치한다.",
-)
-AppLauncher.add_app_launcher_args(parser)
-args_cli, _ = parser.parse_known_args()
-args_cli.enable_cameras = True          # 카메라 렌더 없이는 스트리밍이 불가능하다
-app_launcher = AppLauncher(args_cli)
-simulation_app = app_launcher.app
-
-"""이하 Isaac Sim 기동 후에만 import 가능하다."""
-import math  # noqa: E402
-import torch  # noqa: E402
-from pathlib import Path  # noqa: E402
-
-import robolab.constants  # noqa: E402, F401
-from robolab.core.environments.factory import auto_discover_and_create_cfgs, get_envs  # noqa: E402
-from robolab.core.environments.runtime import create_env, end_episode  # noqa: E402
-from robolab.core.observations.observation_utils import (  # noqa: E402
+import robolab.constants  # noqa: F401
+from robolab.core.environments.factory import auto_discover_and_create_cfgs, get_envs
+from robolab.core.environments.runtime import create_env, end_episode
+from robolab.core.observations.observation_utils import (
     generate_image_obs_from_cameras,
     generate_obs_cfg,
 )
-from robolab.robots.droid import (  # noqa: E402
+from robolab.robots.droid import (
     DroidCfg,
     DroidRelIKActionCfg,
     ProprioceptionObservationCfg,
     contact_gripper,
 )
-from robolab.variations.camera import (  # noqa: E402
+from robolab.variations.camera import (
     EgocentricMirroredCameraCfg,
     HeadCameraCfg,
     OverShoulderLeftCameraCfg,
     OverShoulderRightCameraCfg,
 )
-from robolab.variations.lighting import SphereLightCfg  # noqa: E402
+from robolab.variations.lighting import SphereLightCfg
 
-from franka_teleop import config, safety  # noqa: E402
-from franka_teleop.conveyor import Conveyor  # noqa: E402
-from franka_teleop.world_assets import WorldAssetsCfg  # noqa: E402
-from franka_teleop.camera import TeleopBehindCameraCfg  # noqa: E402
-from franka_teleop.state import TeleopState  # noqa: E402
-from franka_teleop.web_server import start_in_thread  # noqa: E402
+from franka_env import config, safety
+from franka_env.camera import TeleopBehindCameraCfg
+from franka_env.conveyor import Conveyor
+from franka_env.state import TeleopState
+from franka_env.web_server import start_in_thread
+from franka_env.world_assets import WorldAssetsCfg
 
 robolab.constants.VERBOSE = False
 robolab.constants.RECORD_IMAGE_DATA = False
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger("teleop")
-
-TASKS_DIR = str(Path(__file__).resolve().parent / "tasks")
+# 태스크 정의는 env/src/tasks 에 있다 (이 파일 기준 ../tasks).
+TASKS_DIR = str(Path(__file__).resolve().parents[1] / "tasks")
 
 CAMERAS = {
     "behind": TeleopBehindCameraCfg,                    # 로봇 뒤 위 — 키 방향과 화면 방향이 일치
@@ -105,10 +68,12 @@ CAMERAS = {
     "over_shoulder_right": OverShoulderRightCameraCfg,
     "egocentric": EgocentricMirroredCameraCfg,          # 1인칭 — 작업면만 보인다
 }
+CAMERA_CHOICES = tuple(CAMERAS)
 
 
+# ── 환경 등록 ────────────────────────────────────────────────────────────
 def register_env(task: str, camera_cfg) -> None:
-    """이 저장소의 태스크를 상대 IK 액션 + Droid 로봇으로 등록한다.
+    """태스크를 상대 IK 액션 + Droid 로봇으로 등록한다.
 
     RTX 3090(24GB) 한 장이라 RoboLab 권장(48GB)에 못 미친다. 부가 센서를 빼고
     뷰포트 카메라 하나만 남겨 VRAM 을 아낀다 (실측 9.5GB).
@@ -138,7 +103,8 @@ def register_env(task: str, camera_cfg) -> None:
     )
 
 
-def first_image(group: dict) -> torch.Tensor | None:
+# ── 관측 · 영상 ──────────────────────────────────────────────────────────
+def first_image(group) -> torch.Tensor | None:
     """관측 그룹에서 첫 번째 이미지 텐서 (N,H,W,C) 를 꺼낸다.
 
     카메라 관측 항목의 이름은 카메라 설정 클래스에서 동적으로 만들어지므로
@@ -166,7 +132,9 @@ def encode_jpeg(image: torch.Tensor, width: int) -> bytes | None:
         height = int(array.shape[0] * width / array.shape[1])
         array = cv2.resize(array, (width, height), interpolation=cv2.INTER_AREA)
 
-    ok, buffer = cv2.imencode(".jpg", array, [int(cv2.IMWRITE_JPEG_QUALITY), config.STREAM_JPEG_QUALITY])
+    ok, buffer = cv2.imencode(
+        ".jpg", array, [int(cv2.IMWRITE_JPEG_QUALITY), config.STREAM_JPEG_QUALITY]
+    )
     return buffer.tobytes() if ok else None
 
 
@@ -207,12 +175,13 @@ def screen_to_world(delta: list[float], azimuth: float) -> list[float]:
     ]
 
 
+# ── 기동 시 진단 ─────────────────────────────────────────────────────────
 def log_physics_scene() -> None:
     """PhysX 씬 설정을 찍는다.
 
-    NVIDIA 의 공식 컨베이어 테스트는 enableGPUDynamics=False, broadphase=MBP 를
-    전제로 한다. Isaac Lab 에 device="cpu" 를 준다고 이 값들이 실제로 그렇게
-    되는지는 확인해 봐야 안다 — 표면 속도가 안 먹는 이유일 수 있다.
+    NVIDIA 공식 컨베이어 테스트는 enableGPUDynamics=False, broadphase=MBP 를
+    전제로 한다. 표면 속도가 안 먹을 때 여기부터 확인하면 된다
+    (실제로는 이 값이 맞아도 안 먹었다 — franka_env/conveyor.py 참고).
     """
     try:
         import omni.usd
@@ -223,12 +192,14 @@ def log_physics_scene() -> None:
             if not prim.IsA(UsdPhysics.Scene):
                 continue
             api = PhysxSchema.PhysxSceneAPI.Get(stage, prim.GetPath())
+
             def val(getter):
                 try:
-                    a = getter()
-                    return a.Get() if a else None
+                    attr = getter()
+                    return attr.Get() if attr else None
                 except Exception:
                     return None
+
             print(
                 f"[physx] {prim.GetPath()} "
                 f"gpu_dynamics={val(api.GetEnableGPUDynamicsAttr)} "
@@ -245,7 +216,7 @@ def log_scene_bounds() -> None:
     """로드된 스테이지에서 테이블과 창고의 실제 크기·위치를 재서 찍는다.
 
     손으로 계산한 USD scale 과 시뮬레이터가 실제로 쓰는 값이 어긋나면 바로
-    드러나고, 창고 안에서 작업대를 어디에 놓을지 정할 때도 이 값을 본다.
+    드러난다. 치수를 주장하기 전에 이 출력을 볼 것.
     """
     try:
         import omni.usd
@@ -262,7 +233,7 @@ def log_scene_bounds() -> None:
 
         for name, prim in wanted.items():
             if prim is None:
-                print(f"[teleop] '{name}' 프림을 찾지 못했습니다.", flush=True)
+                print(f"[env] '{name}' 프림을 찾지 못했습니다.", flush=True)
                 continue
             rng = (
                 UsdGeom.Imageable(prim)
@@ -272,14 +243,16 @@ def log_scene_bounds() -> None:
             lo, hi, size = rng.GetMin(), rng.GetMax(), rng.GetSize()
             label = "테이블 상판" if name == "table" else "창고"
             print(
-                f"[teleop] {label}: X {size[0]:.2f}m Y {size[1]:.2f}m Z {size[2]:.2f}m  "
-                f"범위 X[{lo[0]:.2f},{hi[0]:.2f}] Y[{lo[1]:.2f},{hi[1]:.2f}] Z[{lo[2]:.2f},{hi[2]:.2f}]",
+                f"[env] {label}: X {size[0]:.2f}m Y {size[1]:.2f}m Z {size[2]:.2f}m  "
+                f"범위 X[{lo[0]:.2f},{hi[0]:.2f}] Y[{lo[1]:.2f},{hi[1]:.2f}] "
+                f"Z[{lo[2]:.2f},{hi[2]:.2f}]",
                 flush=True,
             )
     except Exception as exc:  # noqa: BLE001
-        print(f"[teleop] 씬 크기 측정 실패: {exc}", flush=True)
+        print(f"[env] 씬 크기 측정 실패: {exc}", flush=True)
 
 
+# ── 에피소드 ─────────────────────────────────────────────────────────────
 def reset_episode(env, state, reason: str):
     """에피소드를 끝내고 새로 시작한다.
 
@@ -291,9 +264,9 @@ def reset_episode(env, state, reason: str):
                 action[self._frozen_envs] = 0.0   # 액션을 0 으로 덮어쓴다
 
     이 되어 팔이 영영 움직이지 않고, 상태도 종료 시점에 멈춘 채로 남는다.
-    사람이 계속 조작해야 하는 텔레오퍼레이션에서는 이 동작이 치명적이므로,
-    RoboLab 이 제공하는 reset_eval_state() 로 freeze 플래그와 _has_stepped 를
-    내려서 다음 reset() 이 정상 리셋 경로(super()._reset_idx)를 타게 해야 한다.
+    사람이 계속 조작해야 하는 환경에서는 치명적이므로, RoboLab 이 제공하는
+    reset_eval_state() 로 freeze 플래그와 _has_stepped 를 내려서 다음 reset() 이
+    정상 리셋 경로(super()._reset_idx)를 타게 해야 한다.
 
     그냥 env.reset() 만 부르면 _has_stepped=True 라서 리셋이 아니라 freeze 가
     일어난다 — 겉보기엔 팔이 홈으로 돌아가도 그 뒤로 조작이 먹지 않는다.
@@ -302,20 +275,41 @@ def reset_episode(env, state, reason: str):
     env.reset_eval_state()    # freeze 해제 (이게 핵심)
     obs, _ = env.reset()
     state.on_reset_done()
-    print(f"[teleop] 리셋: {reason}", flush=True)
+    print(f"[env] 리셋: {reason}", flush=True)
     return obs
 
 
-def main() -> None:
-    camera_cfg = CAMERAS[args_cli.camera]
-    register_env(args_cli.task, camera_cfg)
-    task_envs = get_envs(task=args_cli.task)
+# ── 메인 루프 ────────────────────────────────────────────────────────────
+def run(args, simulation_app) -> None:
+    """환경을 만들고 텔레오퍼레이션 루프를 돈다.
+
+    Args:
+        args: env/script 의 엔트리포인트가 파싱한 인자.
+        simulation_app: AppLauncher 가 만든 앱 핸들.
+    """
+    try:
+        _run(args, simulation_app)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[env] 종료: {exc}", flush=True)
+        traceback.print_exc()
+        simulation_app.close()
+        raise
+
+
+def _run(args, simulation_app) -> None:
+    camera_cfg = CAMERAS[args.camera]
+    register_env(args.task, camera_cfg)
+    task_envs = get_envs(task=args.task)
     if not task_envs:
-        logger.error("환경을 찾지 못했습니다: %s — tasks/ 아래 태스크 이름을 확인하세요.", args_cli.task)
+        print(
+            f"[env] 환경을 찾지 못했습니다: {args.task} — env/src/tasks 아래 "
+            "태스크 이름을 확인하세요.",
+            flush=True,
+        )
         simulation_app.close()
         return
     env_name = task_envs[0]
-    print(f"[teleop] 환경: {env_name}  카메라: {args_cli.camera}", flush=True)
+    print(f"[env] 환경: {env_name}  카메라: {args.camera}", flush=True)
 
     state = TeleopState()
     start_in_thread(state)
@@ -323,12 +317,15 @@ def main() -> None:
     # Fabric 은 CPU 물리에서도 켜 두어야 한다. 껐더니 write_root_pose_to_sim 으로
     # 쓴 위치가 렌더러에 전달되지 않아서, 물리 상태는 움직이는데 화면은 그대로인
     # 상태가 됐다(계측 숫자만 보고 동작한다고 착각하기 쉬운 함정이다).
-    use_fabric = not args_cli.no_fabric
+    use_fabric = not args.no_fabric
     env, _ = create_env(
-        env_name, device=args_cli.physics_device, num_envs=1, use_fabric=use_fabric
+        env_name, device=args.physics_device, num_envs=1, use_fabric=use_fabric
     )
-    print(f"[teleop] 물리={args_cli.physics_device} use_fabric={use_fabric} "
-          f"컨베이어={args_cli.conveyor}", flush=True)
+    print(
+        f"[env] 물리={args.physics_device} use_fabric={use_fabric} "
+        f"컨베이어={args.conveyor}",
+        flush=True,
+    )
     obs, _ = env.reset()
     log_scene_bounds()
     log_physics_scene()
@@ -336,20 +333,22 @@ def main() -> None:
     belt = Conveyor(
         env,
         config.BELT_SPEED_LEVELS[config.BELT_SPEED_DEFAULT_INDEX],
-        mode=args_cli.conveyor,
+        mode=args.conveyor,
     )
     if belt.ready:
-        print(f"[teleop] 컨베이어 준비 — 반송 대상 강체 {belt.item_count}개"
-              f"(그중 순환 블록 {belt.block_count}개), 초기 속도 {belt.speed:.2f} m/s",
-              flush=True)
+        print(
+            f"[env] 컨베이어 준비 — 반송 대상 강체 {belt.item_count}개"
+            f"(그중 순환 {belt.block_count}개), 초기 속도 {belt.speed:.2f} m/s",
+            flush=True,
+        )
     else:
-        print("[teleop] 경고: 반송면 또는 블록을 찾지 못해 컨베이어가 동작하지 않습니다.", flush=True)
+        print("[env] 경고: 반송면 또는 화물을 찾지 못해 컨베이어가 동작하지 않습니다.", flush=True)
 
     # 궤도 카메라용 핸들. 이름을 못 찾으면 시점 고정으로 동작한다.
     cam_name = camera_sensor_name(camera_cfg)
     camera = env.scene[cam_name] if cam_name and cam_name in env.scene.keys() else None
     if camera is None:
-        print(f"[teleop] 경고: 카메라 센서 '{cam_name}' 를 찾지 못해 시점 조작이 비활성화됩니다.", flush=True)
+        print(f"[env] 경고: 카메라 센서 '{cam_name}' 를 찾지 못해 시점 조작이 비활성화됩니다.", flush=True)
     cam_target = torch.tensor([config.CAM_TARGET], device=env.device, dtype=torch.float32)
     last_eye = None
 
@@ -358,9 +357,9 @@ def main() -> None:
     recycled = 0
     hz_mark, hz_step, hz = time.monotonic(), 0, 0.0
 
-    # Isaac Sim(Kit)이 로깅 설정을 덮어써서 logger 출력이 사라진다.
-    # 기동 판정에 쓰는 신호이므로 print 로 직접 찍는다 (scripts/teleop_start.sh 참고).
-    print(f"[teleop] 준비 완료 — 브라우저에서 http://<서버주소>:{config.PORT} 로 접속하세요.", flush=True)
+    # Isaac Sim(Kit)이 로깅 설정을 덮어써서 logging 출력이 사라진다.
+    # 기동 판정에 쓰는 신호라 print 로 직접 찍는다 (scripts/sim_start.sh 참고).
+    print(f"[env] 준비 완료 — 브라우저에서 http://<서버주소>:{config.PORT} 로 접속하세요.", flush=True)
 
     while simulation_app.is_running():
         delta, gripper, reset = state.consume()
@@ -394,7 +393,9 @@ def main() -> None:
         ee_pos = proprio.get("ee_pos")
 
         d = torch.tensor(
-            screen_to_world(delta, state.camera_azimuth()), device=env.device, dtype=action.dtype
+            screen_to_world(delta, state.camera_azimuth()),
+            device=env.device,
+            dtype=action.dtype,
         )
         warn = ""
         if ee_pos is not None:
@@ -410,7 +411,7 @@ def main() -> None:
         obs, _, term, trunc, _ = env.step(action)
         step += 1
 
-        # 출구를 지난 블록을 입구로 되돌려 흐름을 끊기지 않게 한다.
+        # 출구를 지난 화물을 입구로 되돌려 흐름을 끊기지 않게 한다.
         recycled += belt.recycle()
 
         # 제어 주파수 측정 (1초 창)
@@ -422,7 +423,7 @@ def main() -> None:
 
         image = first_image(obs.get("viewport_cam", {}))
         if image is not None:
-            jpeg = encode_jpeg(image, args_cli.stream_width)
+            jpeg = encode_jpeg(image, args.stream_width)
             if jpeg is not None:
                 state.publish_frame(jpeg)
 
@@ -447,13 +448,3 @@ def main() -> None:
     end_episode(env)
     env.close()
     simulation_app.close()
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as exc:  # noqa: BLE001
-        logger.error("종료: %s", exc)
-        traceback.print_exc()
-        simulation_app.close()
-        sys.exit(1)
