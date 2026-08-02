@@ -168,7 +168,9 @@ function connect() {
     document.getElementById("grip").style.color = m.gripper === "CLOSED" ? "#f87171" : "#4ade80";
     document.getElementById("speed").textContent = m.speed ? m.speed.toFixed(2) + "×" : "–";
     const beltEl = document.getElementById("belt");
-    beltEl.textContent = typeof m.belt === "number" ? m.belt.toFixed(2) + " m/s" : "–";
+    beltEl.textContent = typeof m.belt_mpm === "number"
+      ? m.belt_mpm.toFixed(1) + " m/분"
+      : "–";
     beltEl.style.color = m.belt_on === false ? "#f87171" : "";
     document.getElementById("recyc").textContent = m.recycled ?? "–";
     document.getElementById("camr").textContent = m.cam_radius ? m.cam_radius.toFixed(2) + " m" : "–";

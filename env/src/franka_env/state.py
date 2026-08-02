@@ -238,7 +238,10 @@ class TeleopState:
             self._telemetry["speed"] = config.SPEED_LEVELS[self._speed_idx]
             self._telemetry["cam_radius"] = round(self._cam_radius, 2)
             speed = config.BELT_SPEED_LEVELS[self._belt_idx]
+            mpm = config.BELT_SPEED_MPM[self._belt_idx]
+            # 내부 계산은 m/s 지만 표시는 실물 관례대로 m/분 으로 한다.
             self._telemetry["belt"] = round(speed, 3) if self._belt_on else 0.0
+            self._telemetry["belt_mpm"] = round(mpm, 1) if self._belt_on else 0.0
             self._telemetry["belt_on"] = self._belt_on
 
     def on_reset_done(self) -> None:
