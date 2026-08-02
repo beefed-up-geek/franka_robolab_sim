@@ -85,8 +85,18 @@ REST_Z = BELT_TOP_Z + BLOCK_HALF     # 블록 기준 (회수 위치 계산용)
 REST_Z_TOL = 0.015                   # 이보다 들리면 구동 대상에서 제외
 ON_BELT_DX = 0.09                    # 벨트 폭 방향 허용치
 
-# 입구에 블록이 겹쳐 쌓이지 않도록, 이 거리 안에 다른 블록이 있으면 투입을 미룬다.
-INLET_CLEARANCE = 0.11
+# 화물 사이 간격. 입구 근처에 이 거리 안으로 다른 화물이 있으면 투입을 미루므로,
+# 결과적으로 벨트 위 간격이 된다. 0.18 이면 지름 70mm 통조림 사이에 110mm 쯤
+# 빈 자리가 생긴다.
+#
+# 사용 구간이 0.72m 뿐이라 이 간격에서는 벨트에 4개까지만 올라간다. 그래서 종류를
+# 여러 개 유지하려면 대기열이 필요하다 — 출구를 지난 화물은 테이블 아래
+# STAGING_POS 에 숨겨 두었다가 입구가 비면 하나씩 다시 투입한다.
+INLET_CLEARANCE = 0.18
+
+# 대기 중인 화물을 숨겨 두는 곳. 상판(z=0) 아래라 카메라에 잡히지 않는다.
+# 중력에 떨어지지 않도록 대기하는 동안 매 스텝 이 자리에 다시 써 준다.
+STAGING_POS = (BELT_X, INLET_Y, -0.30)
 
 # 테이블 아래로 완전히 떨어진 물체는 어디에 있든 회수한다.
 FALLEN_Z = -0.10
@@ -138,6 +148,8 @@ class Conveyor:
         # 만 일어나므로, 로봇이 집어 다른 곳에 둔 물체는 저절로 대상에서 빠진다.
         self._blocks: list[str] = [n for n in self._items if n not in NO_RECIRCULATE]
         self._half_height: dict[str, float] = self._measure_half_heights()
+        # 입구가 빌 때까지 기다리는 화물. 순서대로 다시 투입된다.
+        self._queue: list[str] = []
         self._belt_found = self._check_belt()
         if self.mode == "surface":
             self._apply_surface_velocity()
@@ -403,53 +415,81 @@ class Conveyor:
             "block_z": zs,
             "block_vy": vys,
             "items_on_belt": items_on_belt,
+            "queued": len(self._queue),
             "others": others,
         }
 
     def recycle(self) -> int:
-        """출구를 지났거나 떨어진 블록을 입구로 되돌린다. 되돌린 개수를 반환."""
+        """출구를 지났거나 떨어진 화물을 회수해 대기열에 넣고, 입구가 비면 투입한다.
+
+        곧바로 입구로 되돌리지 않고 대기열을 거치는 이유는 간격 때문이다. 간격을
+        넓게 잡으면 벨트에 몇 개밖에 올라가지 않는데, 그렇다고 화물 종류를 줄이면
+        시연이 단조로워진다. 남는 것을 테이블 아래에 숨겨 두었다가 자리가 나면
+        투입하면 종류는 그대로 두고 간격만 넓힐 수 있다.
+        """
         if not self._blocks:
             return 0
 
         positions = self._positions()
-        moved = 0
 
+        # 1) 회수 대상을 대기열로 보낸다.
         for name, pos in positions.items():
+            if name in self._queue:
+                continue
             x, y, z = float(pos[0]), float(pos[1]), float(pos[2])
-            # 출구를 지난 화물을 회수한다. "벨트에 얹혀 있을 때" 로만 좁히면
-            # 둥근 물체가 끝에서 굴러떨어졌을 때 테이블에 그대로 방치된다
-            # (원기둥으로 확인). 그래서 벨트 연장선상에서 낮은 높이에 있으면
-            # 벨트 위든 떨어졌든 모두 회수 대상으로 본다.
-            #
-            # X 범위를 좁게 잡는 것이 중요하다. 넓히면 그릇에 담아 둔 블록까지
-            # 출구 너머로 판정되어 입구로 끌려가 버린다.
+            # 벨트 연장선상 낮은 높이면 벨트 위든 끝에서 굴러떨어졌든 회수한다.
+            # X 를 좁게 보는 것이 중요하다 — 넓히면 통에 담아 둔 화물까지 끌려간다.
             past_outlet = (
                 y > OUTLET_Y
                 and abs(x - BELT_X) < RECOVER_DX
-                and z < BELT_TOP_Z + RECOVER_DZ   # 로봇이 들어 올린 중이면 제외
+                and z < BELT_TOP_Z + RECOVER_DZ
             )
-            fallen = z < FALLEN_Z
-            if not (past_outlet or fallen):
+            if past_outlet or z < FALLEN_Z:
+                self._park(name, len(self._queue))
+                self._queue.append(name)
+
+        # 2) 대기 중인 것은 매 스텝 붙잡아 둔다. 안 그러면 그대로 떨어진다.
+        for slot, name in enumerate(self._queue):
+            self._park(name, slot)
+
+        # 3) 입구가 비었으면 하나 투입한다.
+        if self._queue and self._inlet_clear(positions):
+            self._teleport(self._queue.pop(0))
+            return 1
+        return 0
+
+    def _inlet_clear(self, positions: dict) -> bool:
+        """입구 근처가 비어 있는가. 대기 중인 화물은 세지 않는다."""
+        for name, pos in positions.items():
+            if name in self._queue:
                 continue
+            if (
+                abs(float(pos[1]) - INLET_Y) < INLET_CLEARANCE
+                and abs(float(pos[0]) - BELT_X) < 0.12
+            ):
+                return False
+        return True
 
-            # 입구가 비어 있을 때만 투입한다. 아니면 다음 스텝에 다시 시도.
-            crowded = any(
-                other != name
-                and abs(float(p[1]) - INLET_Y) < INLET_CLEARANCE
-                and abs(float(p[0]) - BELT_X) < 0.12
-                for other, p in positions.items()
-            )
-            if crowded and not fallen:
-                continue
+    def _park(self, name: str, slot: int = 0) -> None:
+        """대기 자리(테이블 아래)에 붙잡아 둔다.
 
-            self._teleport(name)
-            positions[name] = torch.tensor([BELT_X, INLET_Y, REST_Z], device=pos.device)
-            moved += 1
+        여러 개가 한 점에 겹치면 물리 솔버가 불필요하게 밀어내므로 슬롯마다
+        아래로 조금씩 띄운다. 어차피 상판에 가려 보이지 않는다.
+        """
+        obj = self.env.scene[name]
+        device = self.env.device
+        origin = self.env.scene.env_origins[0]
 
-        return moved
+        pose = torch.zeros((1, 7), device=device)
+        pose[0, 0] = STAGING_POS[0] + origin[0]
+        pose[0, 1] = STAGING_POS[1] + origin[1]
+        pose[0, 2] = STAGING_POS[2] - 0.12 * slot + origin[2]
+        pose[0, 3] = 1.0
+        obj.write_root_pose_to_sim(pose)
+        obj.write_root_velocity_to_sim(torch.zeros((1, 6), device=device))
 
     def _teleport(self, name: str) -> None:
-        """블록을 입구로 옮기고 속도를 0으로 만든다.
+        """화물을 입구로 옮기고 속도를 0으로 만든다.
 
         속도를 지우지 않으면 이전 낙하 속도가 남아 벨트를 뚫고 내려간다.
         """

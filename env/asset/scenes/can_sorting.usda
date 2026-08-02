@@ -1,0 +1,210 @@
+#usda 1.0
+(
+    doc = """컨베이어 통조림 분류 씬.
+
+    좌표 규약 — 테이블 상판 z=0, 로봇 베이스가 원점, 지면 z=-0.697.
+    작업면: 좌우(Y) 160cm x 앞뒤(X) 150cm.
+
+    통조림 7종이 벨트를 타고 흘러온다. 간격을 넓게 두려고 벨트에는 4개만 올리고,
+    나머지 3개는 상판 아래에서 대기로 시작한다 — 출구를 지난 것이 대기열로 들어가고
+    입구가 비면 하나씩 투입되므로, 결과적으로 7종이 돌아가며 흐른다
+    (franka_env/conveyor.py 의 recycle 참고).
+
+    종류마다 높이가 달라(33 / 58 / 83mm)
+    파지 높이를 매번 맞춰야 하므로, 같은 크기 블록만 있을 때보다 시연 데이터가
+    풍부해진다. 캔 원점은 **중심**이라 벨트에 얹으려면 반높이만큼 올려야 한다
+    (아래 translate 의 z 값이 그렇게 계산된 것이다).
+
+    컨베이어와 담을 통(grey_bin)은 이 파일에 없다. RoboLab 이 씬 USD 를 통째로
+    스폰할 때 payload 안의 정적 콜라이더가 PhysX 에 등록되지 않는 문제가 있어,
+    둘 다 franka_env/world_assets.py 에서 별도 씬 엔티티로 스폰한다.
+    """
+    defaultPrim = "world"
+    endTimeCode = 0
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    startTimeCode = -1
+    upAxis = "Z"
+)
+
+def Xform "world"
+{
+    quatf xformOp:orient = (1, 0, 0, 0)
+    float3 xformOp:scale = (1, 1, 1)
+    double3 xformOp:translate = (0, 0, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+    def Scope "Looks"
+    {
+        def Material "White_Matte"
+        {
+            token outputs:mdl:displacement.connect = </world/Looks/White_Matte/Shader.outputs:out>
+            token outputs:mdl:surface.connect = </world/Looks/White_Matte/Shader.outputs:out>
+            token outputs:mdl:volume.connect = </world/Looks/White_Matte/Shader.outputs:out>
+
+            def Shader "Shader"
+            {
+                uniform token info:implementationSource = "sourceAsset"
+                uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
+                uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+                color3f inputs:diffuse_color_constant = (0.93, 0.93, 0.94)
+                float inputs:metallic_constant = 0
+                float inputs:reflection_roughness_constant = 0.45
+                float inputs:specular_level = 0.4
+                token outputs:out (renderType = "material")
+            }
+        }
+    }
+
+    def Material "PhysicsMaterial" (
+        prepend apiSchemas = ["PhysicsMaterialAPI", "PhysxMaterialAPI"]
+    )
+    {
+        float physics:dynamicFriction = 0.9
+        float physics:staticFriction = 1.1
+        float physics:restitution = 0
+        uniform token physxMaterial:frictionCombineMode = "max"
+    }
+
+    # -- 흰색 작업대 -----------------------------------------------------
+    # 프림 이름은 반드시 "table" 이어야 한다 (RoboLab 접촉 센서 규약).
+    def Cube "table" (
+        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+    )
+    {
+        double size = 2
+        float3 xformOp:scale = (0.75, 0.8, 0.025)
+        double3 xformOp:translate = (0.3, 0, -0.025)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        rel material:binding = </world/Looks/White_Matte> (
+            bindMaterialAs = "strongerThanDescendants"
+        )
+        rel material:binding:physics = </world/PhysicsMaterial>
+    }
+
+    def Xform "table_legs"
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def Cube "LegFrontLeft" (prepend apiSchemas = ["MaterialBindingAPI"])
+        {
+            double size = 2
+            float3 xformOp:scale = (0.035, 0.035, 0.3235)
+            double3 xformOp:translate = (0.95, 0.7, -0.3735)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </world/Looks/White_Matte> (bindMaterialAs = "strongerThanDescendants")
+        }
+        def Cube "LegFrontRight" (prepend apiSchemas = ["MaterialBindingAPI"])
+        {
+            double size = 2
+            float3 xformOp:scale = (0.035, 0.035, 0.3235)
+            double3 xformOp:translate = (0.95, -0.7, -0.3735)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </world/Looks/White_Matte> (bindMaterialAs = "strongerThanDescendants")
+        }
+        def Cube "LegBackLeft" (prepend apiSchemas = ["MaterialBindingAPI"])
+        {
+            double size = 2
+            float3 xformOp:scale = (0.035, 0.035, 0.3235)
+            double3 xformOp:translate = (-0.35, 0.7, -0.3735)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </world/Looks/White_Matte> (bindMaterialAs = "strongerThanDescendants")
+        }
+        def Cube "LegBackRight" (prepend apiSchemas = ["MaterialBindingAPI"])
+        {
+            double size = 2
+            float3 xformOp:scale = (0.035, 0.035, 0.3235)
+            double3 xformOp:translate = (-0.35, -0.7, -0.3735)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            rel material:binding = </world/Looks/White_Matte> (bindMaterialAs = "strongerThanDescendants")
+        }
+    }
+
+    def Xform "GroundPlane"
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, 0, -0.697)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def Plane "CollisionPlane" (prepend apiSchemas = ["PhysicsCollisionAPI"])
+        {
+            uniform token axis = "Z"
+            uniform token purpose = "guide"
+        }
+    }
+
+    # -- 벨트 위 통조림 7종 ------------------------------------------------
+    def "canned_tuna" (
+        prepend payload = @../objects/hope/canned_tuna.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, -0.36, 0.217)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def "corn_can" (
+        prepend payload = @../objects/hope/corn_can.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, -0.18, 0.23)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def "green_beans_can" (
+        prepend payload = @../objects/hope/green_beans_can.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, -0.36, -0.3)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def "canned_peaches" (
+        prepend payload = @../objects/hope/canned_peaches.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, 0.18, 0.23)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def "pineapple_slices_can" (
+        prepend payload = @../objects/hope/pineapple_slices_can.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, -0.36, -0.42)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def "tomato_sauce_can" (
+        prepend payload = @../objects/hope/tomato_sauce_can.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, 0.0, 0.242)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def "canned_mushrooms" (
+        prepend payload = @../objects/hope/canned_mushrooms.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, -0.36, -0.54)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+}

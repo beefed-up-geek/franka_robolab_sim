@@ -72,7 +72,7 @@ CAMERA_CHOICES = tuple(CAMERAS)
 
 
 # ── 환경 등록 ────────────────────────────────────────────────────────────
-def register_env(task: str, camera_cfg) -> None:
+def register_env(task: str, camera_cfg, world_cfg) -> None:
     """태스크를 상대 IK 액션 + Droid 로봇으로 등록한다.
 
     RTX 3090(24GB) 한 장이라 RoboLab 권장(48GB)에 못 미친다. 부가 센서를 빼고
@@ -94,7 +94,7 @@ def register_env(task: str, camera_cfg) -> None:
         robot_cfg=DroidCfg,
         camera_cfg=[camera_cfg],
         lighting_cfg=SphereLightCfg,
-        background_cfg=WorldAssetsCfg,
+        background_cfg=world_cfg,
         contact_gripper=contact_gripper,
         dt=1 / (60 * 2),
         render_interval=8,
@@ -280,15 +280,17 @@ def reset_episode(env, state, reason: str):
 
 
 # ── 메인 루프 ────────────────────────────────────────────────────────────
-def run(args, simulation_app) -> None:
+def run(args, simulation_app, world_cfg=None) -> None:
     """환경을 만들고 텔레오퍼레이션 루프를 돈다.
 
     Args:
         args: env/script 의 엔트리포인트가 파싱한 인자.
         simulation_app: AppLauncher 가 만든 앱 핸들.
+        world_cfg: 씬에 얹을 월드 에셋 설정. 환경마다 다르므로 실행 스크립트가
+            정한다 (창고 배경, 컨베이어, 담을 통 등). 생략하면 기본 구성.
     """
     try:
-        _run(args, simulation_app)
+        _run(args, simulation_app, world_cfg or WorldAssetsCfg)
     except Exception as exc:  # noqa: BLE001
         print(f"[env] 종료: {exc}", flush=True)
         traceback.print_exc()
@@ -296,9 +298,9 @@ def run(args, simulation_app) -> None:
         raise
 
 
-def _run(args, simulation_app) -> None:
+def _run(args, simulation_app, world_cfg) -> None:
     camera_cfg = CAMERAS[args.camera]
-    register_env(args.task, camera_cfg)
+    register_env(args.task, camera_cfg, world_cfg)
     task_envs = get_envs(task=args.task)
     if not task_envs:
         print(

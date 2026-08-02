@@ -52,6 +52,15 @@ CONVEYOR_POS = (0.52, 0.0, 0.0)
 CONVEYOR_ROT = (0.7071068, 0.0, 0.0, 0.7071068)
 
 
+# 담을 통(grey_bin) 배치 — 실측 420 x 280 x 105mm, 원점이 바닥이라 z=0 에 놓으면
+# 상판(z=0) 위에 그대로 앉는다. Z 로 90도 돌려 긴 변을 Y 로 눕히면 컨베이어
+# (X 0.42~0.62)와 겹치지 않으면서 로봇 팔이 닿는 자리에 들어간다.
+#   결과: X [0.12, 0.40], Y [0.37, 0.79]
+BIN_USD = str(Path(__file__).resolve().parents[2] / "asset" / "fixtures" / "grey_bin.usd")
+BIN_POS = (0.26, 0.58, 0.0)
+BIN_ROT = (0.7071068, 0.0, 0.0, 0.7071068)
+
+
 @configclass
 class WorldAssetsCfg:
     """창고 배경 + 컨베이어. RoboLab 의 background_cfg 자리로 넣는다."""
@@ -83,4 +92,25 @@ class WorldAssetsCfg:
             color=(0.85, 0.87, 0.92),
             visible_in_primary_ray=False,
         ),
+    )
+
+
+@configclass
+class CanSortingWorldCfg(WorldAssetsCfg):
+    """창고 + 컨베이어에 담을 통을 더한 구성 (env/script/env_cans.py 용).
+
+    통을 씬 USD 에 payload 로 넣지 않고 여기서 별도 엔티티로 스폰한다. RoboLab 이
+    씬 USD 를 통째로 스폰할 때 payload 안의 정적 콜라이더가 PhysX 에 등록되지
+    않아서, 담은 물건이 통을 그대로 통과해 버리기 때문이다. 컨베이어를 이쪽으로
+    뺀 것과 같은 이유다.
+    """
+
+    bin = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/grey_bin",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=BIN_USD,
+            # 명시해야 콜라이더가 확실히 잡힌다.
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=BIN_POS, rot=BIN_ROT),
     )
