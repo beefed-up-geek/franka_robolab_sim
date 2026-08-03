@@ -5,8 +5,21 @@
 열어주기 때문에 포트를 나눌 수 없다.
 
   GET /        조작 UI (HTML)
-  GET /stream  카메라 영상 (multipart MJPEG)
+  GET /stream          궤도 카메라 영상 (multipart MJPEG)
+  GET /stream/{view}   view / front / wrist 중 하나
   GET /ws      키/마우스 입력 업링크 + 텔레메트리 다운링크 (WebSocket)
+  GET/POST /reset      시뮬레이션 초기화 (?level=soft|hard|full)
+  GET /telemetry       현재 상태 JSON
+
+/reset 과 /telemetry 는 브라우저도 ROS 도 없이 초기화하고 그 결과를 확인하라고
+둔 것이다. 셸에서 한 줄이면 된다.
+
+    curl -X POST 'http://localhost:8003/reset?level=full'
+    curl -s http://localhost:8003/telemetry | python3 -m json.tool
+
+GET 으로도 /reset 을 받는 것은 REST 관례에는 어긋나지만, 주소창에 치는 것이
+가장 빠른 복구 수단인 경우가 실제로 많아서 일부러 열어 뒀다. 외부에 노출되는
+서비스가 아니라 단일 포트로 묶인 실험용 샌드박스다.
 
 Isaac Sim이 메인 스레드를 점유하므로 이 서버는 별도 스레드에서 자체 asyncio
 이벤트 루프를 돌린다. 공유 지점은 TeleopState 하나뿐이다.
@@ -40,6 +53,7 @@ async def _index(request: web.Request) -> web.Response:
 async def _stream(request: web.Request) -> web.StreamResponse:
     """MJPEG 스트림 — 새 프레임이 올라올 때만 내보낸다."""
     state: TeleopState = request.app["state"]
+    view = request.match_info.get("view", "view")
     response = web.StreamResponse(
         status=200,
         headers={
@@ -53,7 +67,7 @@ async def _stream(request: web.Request) -> web.StreamResponse:
     interval = 1.0 / config.STREAM_MAX_FPS
     try:
         while True:
-            frame, frame_id = state.get_frame()
+            frame, frame_id = state.get_frame(view)
             if frame is not None and frame_id != last_id:
                 last_id = frame_id
                 await response.write(
@@ -64,6 +78,34 @@ async def _stream(request: web.Request) -> web.StreamResponse:
     except (ConnectionResetError, asyncio.CancelledError):
         pass
     return response
+
+
+async def _reset(request: web.Request) -> web.Response:
+    """초기화를 요청한다. 강도는 ?level= 또는 JSON 본문의 level.
+
+    요청만 걸어 두고 바로 돌려준다 — 실제 초기화는 심 스레드가 다음 스텝에
+    한다. 완료를 기다리려면 /telemetry 의 reset_count 가 오르는 것을 보면 된다.
+    """
+    state: TeleopState = request.app["state"]
+    level = request.query.get("level", config.RESET_DEFAULT)
+    if request.body_exists:
+        try:
+            body = await request.json()
+            level = str(body.get("level", level))
+        except (json.JSONDecodeError, ValueError):
+            pass                                  # 본문이 없거나 JSON 이 아니면 쿼리를 쓴다
+    got = state.request_reset(level)
+    logger.info("초기화 요청 %s → %s", level, got)
+    return web.json_response({
+        "ok": True,
+        "level": got,
+        "reset_count": state.get_telemetry().get("reset_count", 0),
+    })
+
+
+async def _telemetry(request: web.Request) -> web.Response:
+    state: TeleopState = request.app["state"]
+    return web.json_response(state.get_telemetry())
 
 
 async def _ws(request: web.Request) -> web.WebSocketResponse:
@@ -103,6 +145,8 @@ async def _ws(request: web.Request) -> web.WebSocketResponse:
             elif kind == "blur":
                 # 브라우저 탭이 포커스를 잃으면 keyup이 안 오므로 즉시 정지시킨다.
                 state.release_all(client_id)
+            elif kind == "reset":
+                state.request_reset(str(data.get("level", config.RESET_DEFAULT)))
             elif kind == "ping":
                 state.heartbeat(client_id)
     finally:
@@ -118,7 +162,11 @@ def _build_app(state: TeleopState) -> web.Application:
     app["state"] = state
     app.router.add_get("/", _index)
     app.router.add_get("/stream", _stream)
+    app.router.add_get("/stream/{view}", _stream)
     app.router.add_get("/ws", _ws)
+    app.router.add_post("/reset", _reset)
+    app.router.add_get("/reset", _reset)
+    app.router.add_get("/telemetry", _telemetry)
     return app
 
 

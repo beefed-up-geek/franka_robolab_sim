@@ -1,0 +1,69 @@
+#usda 1.0
+(
+    doc = """task3 학습 씬 — 정상품만 흐른다.
+
+    통조림 4종이 벨트를 타고 흘러온다. 벨트에는 3개만 올리고 나머지는 상판 아래에서
+    대기로 시작한다 — 출구를 지난 것이 대기열로 들어가고 입구가 비면 하나씩
+    투입되므로, 결과적으로 4종이 돌아가며 흐른다(franka_env/conveyor.py 의 recycle).
+
+    그중 normal_can · sardine_can · fig_can 은 **치수·질량·충돌 형상이 완전히 같고
+    라벨 도안만 다르다.** 잡는 법은 그대로 두고 보이는 것만 바꾸려는 것이다 —
+    라벨이 달라도 같은 동작으로 집힌다는 것을 시연으로 보여 주면, 정책이 캔 종류에
+    동작을 결부시키지 않는다.
+
+    캔 원점은 **중심**이라 벨트에 얹으려면 반높이만큼 올려야 하고, 아래 translate 의
+    z 가 그렇게 계산된 값이다.
+
+    고정 설비는 _can_workcell.usda 를 서브레이어로 공유한다."""
+    subLayers = [
+        @./_can_workcell.usda@
+    ]
+    defaultPrim = "world"
+    endTimeCode = 0
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    startTimeCode = -1
+    upAxis = "Z"
+)
+
+over "world"
+{
+    # -- 벨트에 처음부터 올려 두는 캔 (간격 0.24m) -------------------------
+    def "corn_can" (
+        prepend payload = @../objects/hope/corn_can.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, -0.3, 0.2295)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+    def "normal_can" (
+        prepend payload = @../objects/cans/normal_can.usda@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, -0.06, 0.229)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+    def "sardine_can" (
+        prepend payload = @../objects/cans/sardine_can.usda@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, 0.18, 0.229)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def "fig_can" (
+        prepend payload = @../objects/cans/fig_can.usda@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, -0.36, -0.3)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+}

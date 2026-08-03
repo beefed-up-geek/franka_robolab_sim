@@ -34,29 +34,51 @@ class _Client:
 
 
 class TeleopState:
-    def __init__(self) -> None:
+    def __init__(self, belt_mpm: float | None = None, view: str = "behind") -> None:
+        """
+        Args:
+            view: 시점 프리셋 이름 (config.VIEW_PRESETS). F 키도 여기로 되돌린다.
+            belt_mpm: 컨베이어 초기 속도 [m/분]. 기본 단계에 없는 값이면 목록에
+                끼워 넣는다 — 실험 조건을 임의의 값으로 잡을 수 있어야 하고,
+                그러면서도 키(, .)로 단계를 오갈 수 있어야 하기 때문이다.
+        """
         self._lock = threading.Lock()
 
         self._clients: dict[int, _Client] = {}
 
         # 1회성 이벤트 / 전역 설정 — 여러 클라이언트가 공유해도 무방하다.
         self._gripper = config.GRIPPER_OPEN
-        self._reset_requested = False
+        # 대기 중인 리셋 요청의 **강도** (config.RESET_LEVELS) 또는 None.
+        # 불리언이 아닌 이유: 브라우저 키·ROS·HTTP 가 서로 다른 강도로 요청할 수
+        # 있어야 프로세스를 죽이지 않고도 어떤 상태에서든 빠져나올 수 있다.
+        self._reset_level: str | None = None
+        # ROS 등 외부에서 들어온 명령. 키보드 델타와 **더해진다** — 사람이 잡고
+        # 있는 중에도 정책이 밀어붙일 수 있어야 원격 개입 실험이 된다.
+        # 한 번 쓰면 지운다. 안 지우면 퍼블리셔가 멈춰도 로봇이 계속 흐른다.
+        self._ext_delta: list[float] | None = None
         self._speed_idx = config.SPEED_DEFAULT_INDEX
 
         # 카메라 궤도 — CAM_TARGET 을 중심으로 한 구면좌표
-        self._cam_az = config.CAM_AZIMUTH
-        self._cam_el = config.CAM_ELEVATION
-        self._cam_radius = config.CAM_RADIUS
+        self._view = config.VIEW_PRESETS.get(view, config.VIEW_PRESETS["behind"])
+        self._cam_az, self._cam_el, self._cam_radius = self._view
 
         # 컨베이어 — 심 스레드가 consume_belt() 로 변경분을 가져간다.
-        self._belt_idx = config.BELT_SPEED_DEFAULT_INDEX
+        levels = list(config.BELT_SPEED_MPM)
+        idx = config.BELT_SPEED_DEFAULT_INDEX
+        if belt_mpm is not None:
+            if belt_mpm not in levels:
+                levels.append(belt_mpm)
+                levels.sort()
+            idx = levels.index(belt_mpm)
+        self._belt_mpm = levels
+        self._belt_ms = [v / 60.0 for v in levels]
+        self._belt_idx = idx
         self._belt_on = True
         self._belt_dirty = True
 
-        # 영상
-        self._frame: bytes | None = None
-        self._frame_id = 0
+        # 영상 — 화면 이름별로 따로 들고 있는다 (view / front / wrist).
+        self._frames: dict[str, tuple[bytes, int]] = {}
+        self._frame_seq = 0
 
         # UI 표시용 텔레메트리
         self._telemetry: dict = {}
@@ -92,12 +114,13 @@ class TeleopState:
                     )
             elif code == config.KEY_RESET:
                 if down and code not in client.pressed:
-                    self._reset_requested = True
+                    self._escalate_reset(config.RESET_DEFAULT)
+            elif code == config.KEY_RESET_FULL:
+                if down and code not in client.pressed:
+                    self._escalate_reset("full")
             elif code == config.KEY_VIEW_RESET:
                 if down and code not in client.pressed:
-                    self._cam_az = config.CAM_AZIMUTH
-                    self._cam_el = config.CAM_ELEVATION
-                    self._cam_radius = config.CAM_RADIUS
+                    self._cam_az, self._cam_el, self._cam_radius = self._view
             elif code == config.KEY_BELT_TOGGLE:
                 if down and code not in client.pressed:
                     self._belt_on = not self._belt_on
@@ -106,7 +129,7 @@ class TeleopState:
                 if down and code not in client.pressed:
                     step = -1 if code == config.KEY_BELT_SLOWER else +1
                     self._belt_idx = max(
-                        0, min(len(config.BELT_SPEED_LEVELS) - 1, self._belt_idx + step)
+                        0, min(len(self._belt_ms) - 1, self._belt_idx + step)
                     )
                     self._belt_dirty = True
             elif code in (config.KEY_SPEED_DOWN, config.KEY_SPEED_UP):
@@ -121,6 +144,52 @@ class TeleopState:
             else:
                 client.pressed.discard(code)
                 client.held_steps.pop(code, None)
+
+    # ── 리셋 요청 ────────────────────────────────────────────────────────
+    def _escalate_reset(self, level: str) -> str:
+        """대기 중인 리셋 요청의 강도를 올린다. **락을 쥔 채로** 부른다.
+
+        강한 쪽이 이긴다. 브라우저가 R(soft) 을 누른 직후 수집기가 full 을
+        요청했다면 full 로 나가야 한다 — 약한 요청이 먼저 소비되어 버리면
+        정작 필요한 초기화가 한 스텝 늦어지고, 그 사이 심이 또 터진다.
+        """
+        if level not in config.RESET_LEVELS:
+            level = config.RESET_DEFAULT
+        cur = self._reset_level
+        if cur is None or config.RESET_LEVELS.index(level) > config.RESET_LEVELS.index(cur):
+            self._reset_level = level
+        return self._reset_level
+
+    def request_reset(self, level: str = config.RESET_DEFAULT) -> str:
+        """외부(ROS·HTTP)에서 리셋을 요청한다. 실제로 잡힌 강도를 돌려준다.
+
+        심 스레드가 다음 스텝에 consume() 으로 가져가 처리한다. 여기서 직접
+        리셋하지 않는 이유는 물리 상태를 만지는 일이 전부 심 스레드 소유이기
+        때문이다 — 웹/ROS 스레드에서 write_*_to_sim 을 부르면 조용히 깨진다.
+        """
+        with self._lock:
+            return self._escalate_reset(level)
+
+    def consume_external(self) -> list[float] | None:
+        """외부(ROS) 델타를 꺼내 간다. 한 번 쓰면 지운다.
+
+        키보드 델타와 **따로** 내보내는 이유는 좌표계가 다르기 때문이다. 키보드는
+        화면 기준이라 runner 가 카메라 방위각으로 돌려서 쓰는데, ROS 명령은 월드
+        기준이므로 그 회전을 타면 안 된다. 섞어서 반환했더니 팔이 명령과 반대
+        방향으로 갔다.
+        """
+        with self._lock:
+            d, self._ext_delta = self._ext_delta, None
+            return d
+
+    def set_external_delta(self, delta: list[float]) -> None:
+        """외부에서 한 스텝 분량의 EEF 델타를 넣는다 (ROS /cmd/eef_delta)."""
+        with self._lock:
+            self._ext_delta = [float(v) for v in delta[:6]]
+
+    def set_external_gripper(self, close: bool) -> None:
+        with self._lock:
+            self._gripper = config.GRIPPER_CLOSE if close else config.GRIPPER_OPEN
 
     def release_all(self, client_id: int) -> None:
         """해당 클라이언트의 키만 뗀다 (창 포커스 이탈·연결 종료)."""
@@ -171,23 +240,27 @@ class TeleopState:
             if not self._belt_dirty:
                 return None
             self._belt_dirty = False
-            return config.BELT_SPEED_LEVELS[self._belt_idx], self._belt_on
+            return self._belt_ms[self._belt_idx], self._belt_on
 
     def camera_azimuth(self) -> float:
         with self._lock:
             return self._cam_az
 
-    def get_frame(self) -> tuple[bytes | None, int]:
+    def get_frame(self, name: str = "view") -> tuple[bytes | None, int]:
         with self._lock:
-            return self._frame, self._frame_id
+            frame, frame_id = self._frames.get(name, (None, -1))
+            return frame, frame_id
 
     def get_telemetry(self) -> dict:
         with self._lock:
             return dict(self._telemetry)
 
     # ── 심 스레드 ────────────────────────────────────────────────────────
-    def consume(self) -> tuple[list[float], float, bool]:
-        """이번 스텝의 (6축 델타, 그리퍼, 리셋요청)을 계산해 돌려준다."""
+    def consume(self) -> tuple[list[float], float, str | None]:
+        """이번 스텝의 (6축 델타, 그리퍼, 리셋강도)를 계산해 돌려준다.
+
+        리셋강도는 요청이 없으면 None, 있으면 config.RESET_LEVELS 중 하나다.
+        """
         with self._lock:
             delta = [0.0] * 6
             speed = config.SPEED_LEVELS[self._speed_idx]
@@ -220,14 +293,13 @@ class TeleopState:
                 limit = limit_pos if i < 3 else limit_rot
                 delta[i] = max(-limit, min(limit, delta[i]))
 
-            reset = self._reset_requested
-            self._reset_requested = False
+            reset, self._reset_level = self._reset_level, None
             return delta, self._gripper, reset
 
-    def publish_frame(self, jpeg: bytes) -> None:
+    def publish_frame(self, jpeg: bytes, name: str = "view") -> None:
         with self._lock:
-            self._frame = jpeg
-            self._frame_id += 1
+            self._frame_seq += 1
+            self._frames[name] = (jpeg, self._frame_seq)
 
     def publish_telemetry(self, **kwargs) -> None:
         with self._lock:
@@ -237,17 +309,24 @@ class TeleopState:
             )
             self._telemetry["speed"] = config.SPEED_LEVELS[self._speed_idx]
             self._telemetry["cam_radius"] = round(self._cam_radius, 2)
-            speed = config.BELT_SPEED_LEVELS[self._belt_idx]
-            mpm = config.BELT_SPEED_MPM[self._belt_idx]
+            speed = self._belt_ms[self._belt_idx]
+            mpm = self._belt_mpm[self._belt_idx]
             # 내부 계산은 m/s 지만 표시는 실물 관례대로 m/분 으로 한다.
             self._telemetry["belt"] = round(speed, 3) if self._belt_on else 0.0
             self._telemetry["belt_mpm"] = round(mpm, 1) if self._belt_on else 0.0
             self._telemetry["belt_on"] = self._belt_on
 
-    def on_reset_done(self) -> None:
-        """리셋 후 그리퍼를 열린 상태로 되돌려 UI와 실제 상태를 맞춘다."""
+    def on_reset_done(self, level: str = config.RESET_DEFAULT) -> None:
+        """리셋 후 그리퍼를 열린 상태로 되돌려 UI와 실제 상태를 맞춘다.
+
+        어떤 강도로 몇 번째 리셋이 끝났는지도 텔레메트리에 남긴다. 요청을 보낸
+        쪽(HTTP·ROS)이 **정말 초기화됐는지** 를 확인할 수단이 있어야 한다 —
+        없으면 리셋이 먹었는지 알 길이 없어 결국 프로세스를 죽이게 된다.
+        """
         with self._lock:
             self._gripper = config.GRIPPER_OPEN
             for client in self._clients.values():
                 client.pressed.clear()
                 client.held_steps.clear()
+            self._telemetry["last_reset"] = level
+            self._telemetry["reset_count"] = self._telemetry.get("reset_count", 0) + 1

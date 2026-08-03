@@ -1,0 +1,102 @@
+#usda 1.0
+(
+    doc = """task3 평가 씬 — 팽창·파열된 불량품이 섞여 흐른다.
+
+    train 과 흐르는 물건만 다르고 설비는 완전히 같다(_can_workcell.usda 공유).
+    정상품 4종에 그 짝인 파열품 4종을 더해 8종이 돌아간다.
+
+    짝을 맞춘 이유는 정책이 **결함 자체를** 보게 하기 위해서다. 불량품만 라벨이
+    다르면 그림만 외워도 골라낼 수 있다. 파열품은 원본 메시를 변형해 만든 것이라
+    텍스처·UV 가 정상품과 같고, 부푼 뚜껑·찌그러진 옆면·뜯긴 구멍만 다르다
+    (env/asset/objects/cans/README.md 참고).
+
+    파열품은 아래 뚜껑이 볼록해 벨트 위에서 비스듬히 기운다. 잡기 까다로운 자세라
+    train 에서 보지 못한 조건이 된다."""
+    subLayers = [
+        @./_can_workcell.usda@
+    ]
+    defaultPrim = "world"
+    endTimeCode = 0
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    startTimeCode = -1
+    upAxis = "Z"
+)
+
+over "world"
+{
+    # -- 벨트에 처음부터 올려 두는 캔 (간격 0.24m) -------------------------
+    def "corn_can" (
+        prepend payload = @../objects/hope/corn_can.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, -0.3, 0.2295)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+    def "normal_can" (
+        prepend payload = @../objects/cans/normal_can.usda@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, -0.06, 0.229)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+    def "sardine_can" (
+        prepend payload = @../objects/cans/sardine_can.usda@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, 0.18, 0.229)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def "fig_can" (
+        prepend payload = @../objects/cans/fig_can.usda@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, -0.36, -0.3)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+    def "corn_can_burst" (
+        prepend payload = @../objects/cans/corn_can_burst.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, -0.24, -0.3)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+    def "burst_can" (
+        prepend payload = @../objects/cans/burst_can.usda@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, -0.12, -0.3)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+    def "sardine_can_burst" (
+        prepend payload = @../objects/cans/sardine_can_burst.usda@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, 0.0, -0.3)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+    def "fig_can_burst" (
+        prepend payload = @../objects/cans/fig_can_burst.usda@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.52, 0.12, -0.3)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+}

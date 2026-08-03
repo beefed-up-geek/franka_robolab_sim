@@ -20,10 +20,24 @@
   }
   #view.dragging { cursor: grabbing; }
   #view img { display: block; max-width: min(90vw, 960px); height: auto; pointer-events: none; }
+  #perf {
+    position: absolute; right: 10px; top: 10px; font-size: 13px; font-weight: 600;
+    background: rgba(10,12,15,.78); padding: 5px 10px; border-radius: 5px;
+    letter-spacing: .03em; font-variant-numeric: tabular-nums; pointer-events: none;
+  }
   #hint {
     position: absolute; left: 10px; bottom: 10px; font-size: 11px; line-height: 1.5;
     background: rgba(10,12,15,.72); color: #aab2bf; padding: 5px 9px; border-radius: 5px;
     pointer-events: none; letter-spacing: .02em;
+  }
+  #aux { display: flex; flex-direction: column; gap: 10px; width: 300px; }
+  .pane { position: relative; background: #000; border: 1px solid #2a2f38; border-radius: 8px;
+          overflow: hidden; line-height: 0; }
+  .pane img { display: block; width: 100%; height: auto; }
+  .pane b {
+    position: absolute; left: 8px; top: 8px; font-size: 10.5px; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase;
+    background: rgba(10,12,15,.72); color: #aab2bf; padding: 3px 7px; border-radius: 4px;
   }
   aside { display: flex; flex-direction: column; gap: 12px; width: 262px; }
   .card { background: #1b1e24; border: 1px solid #2a2f38; border-radius: 8px; padding: 12px 14px; }
@@ -54,8 +68,13 @@
   <div id="status" class="warn">연결 중…</div>
   <div id="wrap">
     <div id="view">
-      <img id="cam" src="/stream" alt="시뮬레이션 영상">
+      <img id="cam" alt="궤도 시점 (드래그·줌)">
+      <div id="perf">– Hz</div>
       <div id="hint">드래그: 시점 회전 · 휠: 줌 · F: 시점 초기화</div>
+    </div>
+    <div id="aux">
+      <div class="pane"><img data-stream="front" alt="정면 고정 시점"><b>front</b></div>
+      <div class="pane"><img data-stream="wrist" alt="그리퍼 손목 시점"><b>wrist</b></div>
     </div>
     <aside>
       <div class="card">
@@ -69,6 +88,9 @@
           <tr><td>컨베이어</td><td id="belt">–</td></tr>
           <tr><td>블록 순환</td><td id="recyc">–</td></tr>
           <tr><td>카메라 거리</td><td id="camr">–</td></tr>
+          <tr><td>대기열</td><td id="queued">–</td></tr>
+          <tr><td>통에 담김</td><td id="binned">–</td></tr>
+          <tr><td>불량 비율</td><td id="defect">–</td></tr>
           <tr><td>스텝</td><td id="step">–</td></tr>
           <tr><td>제어 Hz</td><td id="hz">–</td></tr>
         </table>
@@ -89,6 +111,7 @@
         <h2>동작</h2>
         <div class="row"><kbd data-k="Space">Space</kbd><span>그리퍼 열기/닫기</span></div>
         <div class="row"><kbd data-k="KeyR">R</kbd><span>에피소드 리셋</span></div>
+        <div class="row"><kbd data-k="KeyN">N</kbd><span>전체 초기화 (씬 되돌리기)</span></div>
         <div class="row"><kbd data-k="KeyF">F</kbd><span>시점 초기화</span></div>
         <div class="row"><kbd data-k="BracketLeft">[</kbd><kbd data-k="BracketRight">]</kbd><span>배속 −/+</span></div>
         <div class="row"><kbd data-k="KeyB">B</kbd><span>컨베이어 정지/가동</span></div>
@@ -101,7 +124,7 @@
 const CODES = new Set([
   "KeyW","KeyS","KeyA","KeyD","KeyQ","KeyE",
   "KeyZ","KeyX","KeyT","KeyG","KeyC","KeyV",
-  "Space","KeyR","KeyF","BracketLeft","BracketRight","KeyB","Comma","Period",
+  "Space","KeyR","KeyN","KeyF","BracketLeft","BracketRight","KeyB","Comma","Period",
 ]);
 
 const statusEl = document.getElementById("status");
@@ -176,6 +199,16 @@ function connect() {
     document.getElementById("camr").textContent = m.cam_radius ? m.cam_radius.toFixed(2) + " m" : "–";
     document.getElementById("step").textContent = m.step ?? "–";
     document.getElementById("hz").textContent = typeof m.hz === "number" ? m.hz.toFixed(1) : "–";
+    document.getElementById("queued").textContent = m.queued ?? "–";
+    document.getElementById("binned").textContent = m.binned ?? "–";
+    document.getElementById("defect").textContent =
+      typeof m.defect_ratio === "number" ? (m.defect_ratio * 100).toFixed(0) + "%" : "–";
+    // 제어율은 조작감을 그대로 반영하므로 화면 위에 크게 띄운다.
+    const perf = document.getElementById("perf");
+    if (typeof m.hz === "number") {
+      perf.textContent = m.hz.toFixed(1) + " Hz";
+      perf.style.color = m.hz >= 6 ? "#4ade80" : m.hz >= 3 ? "#fbbf24" : "#f87171";
+    }
     if (m.warn) setStatus(m.warn, "warn");
     else if (alive) setStatus("연결됨 — 이 창을 클릭하고 키를 누르세요", "ok");
   };
@@ -219,9 +252,16 @@ addEventListener("blur", () => {
 // 서버가 입력 두절을 감지해 정지시키는 것을 막는 하트비트.
 setInterval(() => send({ type: "ping" }), 200);
 
-// 스트림이 끊기면 <img>를 다시 물린다.
-document.getElementById("cam").addEventListener("error", () => {
-  setTimeout(() => { document.getElementById("cam").src = "/stream?t=" + Date.now(); }, 1000);
+// 스트림이 끊기면 <img>를 다시 물린다. 세 화면 모두 같은 방식이다.
+function bindStream(el, path) {
+  el.src = path;
+  el.addEventListener("error", () => {
+    setTimeout(() => { el.src = path + "?t=" + Date.now(); }, 1000);
+  });
+}
+bindStream(document.getElementById("cam"), "/stream");
+document.querySelectorAll("[data-stream]").forEach((el) => {
+  bindStream(el, "/stream/" + el.dataset.stream);
 });
 
 connect();

@@ -1,16 +1,30 @@
 #usda 1.0
 (
+    doc = """task3 학습/평가 환경이 공유하는 고정 설비 — 작업대·다리·지면·재질.
+
+    좌표 규약 — 테이블 상판 z=0, 로봇 베이스가 원점, 지면 z=-0.697.
+    작업면: 좌우(Y) 160cm x 앞뒤(X) 150cm.
+
+    캔은 여기 없다. 흐르는 물건만 다른 두 환경(task3_train / task3_test)이
+    이 파일을 서브레이어로 얹어 쓴다. 복사해 두면 한쪽만 고쳐져 두 환경이
+    조용히 달라지고, 그러면 평가 결과가 환경 차이 탓인지 정책 탓인지
+    구분할 수 없게 된다.
+
+    컨베이어와 담을 통(grey_bin)은 이 파일에 없다. RoboLab 이 씬 USD 를 통째로
+    스폰할 때 payload 안의 정적 콜라이더가 PhysX 에 등록되지 않는 문제가 있어,
+    둘 다 franka_env/world_assets.py 에서 별도 씬 엔티티로 스폰한다.
+    """
     doc = """컨베이어 통조림 분류 씬.
 
     좌표 규약 — 테이블 상판 z=0, 로봇 베이스가 원점, 지면 z=-0.697.
     작업면: 좌우(Y) 160cm x 앞뒤(X) 150cm.
 
-    통조림 7종이 벨트를 타고 흘러온다. 간격을 넓게 두려고 벨트에는 4개만 올리고,
-    나머지 3개는 상판 아래에서 대기로 시작한다 — 출구를 지난 것이 대기열로 들어가고
-    입구가 비면 하나씩 투입되므로, 결과적으로 7종이 돌아가며 흐른다
+    통조림 4종이 벨트를 타고 흘러온다. 간격을 넓게 두려고 벨트에는 3개만 올리고,
+    나머지 1개는 상판 아래에서 대기로 시작한다 — 출구를 지난 것이 대기열로 들어가고
+    입구가 비면 하나씩 투입되므로, 결과적으로 4종이 돌아가며 흐른다
     (franka_env/conveyor.py 의 recycle 참고).
 
-    종류마다 높이가 달라(33 / 58 / 83mm)
+    종류마다 높이가 달라(33 / 58mm)
     파지 높이를 매번 맞춰야 하므로, 같은 크기 블록만 있을 때보다 시연 데이터가
     풍부해진다. 캔 원점은 **중심**이라 벨트에 얹으려면 반높이만큼 올려야 한다
     (아래 translate 의 z 값이 그렇게 계산된 것이다).
@@ -135,76 +149,5 @@ def Xform "world"
             uniform token axis = "Z"
             uniform token purpose = "guide"
         }
-    }
-
-    # -- 벨트 위 통조림 7종 ------------------------------------------------
-    def "canned_tuna" (
-        prepend payload = @../objects/hope/canned_tuna.usd@
-    )
-    {
-        quatf xformOp:orient = (1, 0, 0, 0)
-        float3 xformOp:scale = (1, 1, 1)
-        double3 xformOp:translate = (0.52, -0.36, 0.217)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
-    }
-
-    def "corn_can" (
-        prepend payload = @../objects/hope/corn_can.usd@
-    )
-    {
-        quatf xformOp:orient = (1, 0, 0, 0)
-        float3 xformOp:scale = (1, 1, 1)
-        double3 xformOp:translate = (0.52, -0.18, 0.23)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
-    }
-
-    def "green_beans_can" (
-        prepend payload = @../objects/hope/green_beans_can.usd@
-    )
-    {
-        quatf xformOp:orient = (1, 0, 0, 0)
-        float3 xformOp:scale = (1, 1, 1)
-        double3 xformOp:translate = (0.52, -0.36, -0.3)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
-    }
-
-    def "canned_peaches" (
-        prepend payload = @../objects/hope/canned_peaches.usd@
-    )
-    {
-        quatf xformOp:orient = (1, 0, 0, 0)
-        float3 xformOp:scale = (1, 1, 1)
-        double3 xformOp:translate = (0.52, 0.18, 0.23)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
-    }
-
-    def "pineapple_slices_can" (
-        prepend payload = @../objects/hope/pineapple_slices_can.usd@
-    )
-    {
-        quatf xformOp:orient = (1, 0, 0, 0)
-        float3 xformOp:scale = (1, 1, 1)
-        double3 xformOp:translate = (0.52, -0.36, -0.42)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
-    }
-
-    def "tomato_sauce_can" (
-        prepend payload = @../objects/hope/tomato_sauce_can.usd@
-    )
-    {
-        quatf xformOp:orient = (1, 0, 0, 0)
-        float3 xformOp:scale = (1, 1, 1)
-        double3 xformOp:translate = (0.52, 0.0, 0.242)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
-    }
-
-    def "canned_mushrooms" (
-        prepend payload = @../objects/hope/canned_mushrooms.usd@
-    )
-    {
-        quatf xformOp:orient = (1, 0, 0, 0)
-        float3 xformOp:scale = (1, 1, 1)
-        double3 xformOp:translate = (0.52, -0.36, -0.54)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
     }
 }

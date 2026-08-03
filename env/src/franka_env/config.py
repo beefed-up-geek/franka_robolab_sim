@@ -64,6 +64,23 @@ CAM_ELEV_MAX = 1.45
 CAM_RADIUS_MIN = 0.70
 CAM_RADIUS_MAX = 5.00
 
+# 보조 화면(front·wrist)은 메인보다 드물게 인코딩한다. 세 장을 매 스텝 JPEG 로
+# 만들면 인코딩만으로 제어율이 눈에 띄게 떨어진다 — 조작감은 메인 화면이 좌우한다.
+AUX_STREAM_STRIDE = 3
+
+# 시점 프리셋 — (방위각, 고도각, 거리). **궤도 카메라의 시작 자세**다.
+# 카메라 cfg 의 offset 이 아니라 이 값이 시점을 정한다. runner 가 매 프레임
+# set_world_poses_from_view() 로 프림을 옮기기 때문에 cfg 의 offset 은 첫 스텝에
+# 덮어써진다 — 시점을 바꾸려면 여기를 고쳐야 한다.
+VIEW_PRESETS = {
+    # 로봇 뒤 왼쪽 위. 키 방향과 화면 방향이 대체로 일치한다.
+    "behind": (CAM_AZIMUTH, CAM_ELEVATION, CAM_RADIUS),
+    # 벨트 바깥쪽에서 로봇을 마주 본다. 화물이 왼쪽에서 오른쪽으로 흐르고
+    # 로봇이 뒤에 서므로 캔의 옆모습(부푼 뚜껑)이 실루엣으로 잘 보인다.
+    # 고도각을 더 올리면 카메라가 창고 선반 안으로 들어가 화면이 회색이 된다.
+    "front": (0.0, 0.28, 1.20),
+}
+
 CAM_ORBIT_SENS = 0.006              # 마우스 1px 당 회전량 [rad]
 CAM_ZOOM_SENS = 0.0015              # 휠 1단위 당 거리 변화 비율
 
@@ -106,9 +123,24 @@ KEY_MAP = {
     "KeyV": (5, -1.0),   # yaw -
 }
 
+# ── 초기화 ──────────────────────────────────────────────────────────────
+# 리셋 강도. 뒤로 갈수록 되돌리는 범위가 넓고, 요청이 겹치면 **강한 쪽이 이긴다.**
+#
+#   soft  에피소드만 다시 시작한다. freeze 를 풀고 env.reset() — 팔이 홈으로,
+#         대기열이 비워진다. 화물은 지금 있는 자리에 그대로 남는다.
+#   hard  soft + 로봇 관절 상태를 시뮬레이터에 직접 덮어쓴다. 그리퍼 링키지가
+#         터진 뒤에는 env.reset() 만으로는 밀려난 링크의 실제 자세가 남아
+#         같은 자리에서 다시 터진다 (실측 8회 연속).
+#   full  hard + 씬의 모든 강체를 기본 자세로 되돌리고 컨베이어 장부(대기열·
+#         투입 수·회수 수)를 0 으로 만든다. **프로세스를 다시 띄운 것과 같은
+#         상태**가 목표다 — 이게 있으면 시뮬레이션을 죽였다 살릴 일이 없다.
+RESET_LEVELS = ("soft", "hard", "full")
+RESET_DEFAULT = "soft"
+
 # 눌림 상태가 아니라 1회성 이벤트로 처리하는 키
 KEY_GRIPPER_TOGGLE = "Space"
 KEY_RESET = "KeyR"
+KEY_RESET_FULL = "KeyN"       # 전체 초기화 (RESET_LEVELS 의 full)
 KEY_SPEED_DOWN = "BracketLeft"
 KEY_SPEED_UP = "BracketRight"
 KEY_VIEW_RESET = "KeyF"

@@ -1,14 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""컨베이어 pick-and-place 환경 — 동작 확인용 기본 환경.
+"""task3 평가 환경 — 팽창·파열된 불량품이 섞여 흐른다.
 
-블록이 컨베이어를 타고 흘러오고, 브라우저에서 키보드로 Franka 를 조작해 집는다.
-앞으로 만들 실험 환경들의 템플릿이기도 하다 — 이 파일을 복사해 태스크와 기본값만
-바꾸면 새 환경 스크립트가 된다.
+train 과 설비는 완전히 같고(씬이 _can_workcell.usda 를 공유한다) 흐르는 물건만
+다르다. 정상품 5종에 그 짝인 파열품 5종을 더해 10종이 돌아간다.
+
+짝을 맞춘 이유는 정책이 **결함 자체를** 보게 하기 위해서다. 불량품만 라벨이 다르면
+그림만 외워도 골라낼 수 있다. 파열품은 부푼 뚜껑·찌그러진 옆면·뜯긴 구멍만 다르고
+텍스처는 같다. 게다가 아래 뚜껑이 볼록해 벨트 위에서 비스듬히 기울기 때문에,
+train 에서 보지 못한 파지 자세가 된다.
 
 실행:
-    ./scripts/sim_start.sh env_test          # 컨테이너에서 백그라운드 기동
-    # 또는 컨테이너 안에서 직접
-    /workspace/isaaclab/_isaac_sim/python.sh env/script/env_test.py --headless
+    ./scripts/sim_start.sh task3_test_pick_and_place_can
 
 파일 순서가 중요하다. Isaac Sim(Kit)은 AppLauncher 로 앱을 띄운 뒤에야
 isaaclab/robolab 모듈을 import 할 수 있어서, 아래 순서를 지켜야 한다.
@@ -20,8 +22,6 @@ from pathlib import Path
 
 import cv2  # noqa: F401  — isaaclab 보다 먼저 import 해야 한다. 지우지 말 것.
 
-# env/src 를 import 경로에 넣는다. 컨테이너 PYTHONPATH 에도 들어 있지만,
-# 저장소를 다른 곳에 두고 직접 실행할 때를 위해 여기서도 보장한다.
 SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
@@ -30,9 +30,9 @@ from isaaclab.app import AppLauncher  # noqa: E402
 from franka_env.cli import build_parser  # noqa: E402
 
 parser = build_parser(
-    description="컨베이어 pick-and-place 환경 (테스트용 기본 환경)",
-    task="ConveyorPickPlaceTask",
-    camera="behind",
+    description="task3 평가 환경 (불량품 포함)",
+    task="Task3TestPickPlaceCanTask",
+    view="behind",
     conveyor="script",
 )
 AppLauncher.add_app_launcher_args(parser)
@@ -44,9 +44,11 @@ simulation_app = app_launcher.app
 
 # 앱이 뜬 뒤에만 import 할 수 있다.
 from franka_env.runner import run  # noqa: E402
+from franka_env.world_assets import CanSortingWorldCfg  # noqa: E402
 
 if __name__ == "__main__":
     try:
-        run(args_cli, simulation_app)
+        # 창고·컨베이어에 더해 담을 통(grey_bin)까지 스폰한다.
+        run(args_cli, simulation_app, world_cfg=CanSortingWorldCfg)
     except Exception:
         sys.exit(1)

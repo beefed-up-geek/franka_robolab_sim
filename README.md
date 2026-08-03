@@ -22,7 +22,8 @@ tools/            브라우저 없이 도는 검증 스크립트
 ```bash
 ./scripts/build.sh            # 이미지 빌드 (robolab:teleop 베이스가 없으면 같이 만든다)
 ./scripts/container_up.sh     # 컨테이너 기동
-./scripts/sim_start.sh env_test   # 컨베이어 환경 실행
+./scripts/task3_train.sh      # 실험 환경 — 정상품만
+./scripts/task3_test.sh       # 실험 환경 — 불량품 20% 섞임
 ```
 
 브라우저에서 `http://<서버주소>:8003` 접속. 창을 한 번 클릭해 포커스를 준 뒤 키를 누른다.

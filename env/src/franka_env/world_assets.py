@@ -97,7 +97,7 @@ class WorldAssetsCfg:
 
 @configclass
 class CanSortingWorldCfg(WorldAssetsCfg):
-    """창고 + 컨베이어에 담을 통을 더한 구성 (env/script/env_cans.py 용).
+    """창고 + 컨베이어에 담을 통을 더한 구성 (task3 환경들이 쓴다).
 
     통을 씬 USD 에 payload 로 넣지 않고 여기서 별도 엔티티로 스폰한다. RoboLab 이
     씬 USD 를 통째로 스폰할 때 payload 안의 정적 콜라이더가 PhysX 에 등록되지

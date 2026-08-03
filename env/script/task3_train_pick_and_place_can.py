@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""컨베이어 통조림 분류 환경.
+"""task3 학습 환경 — 정상품만 흐른다.
 
-통조림 7종이 벨트를 타고 흘러오고, 브라우저에서 Franka 를 조작해 집어 회색 통에
-담는다. 캔은 높이가 33 / 58 / 83mm 로 제각각이라 파지 높이를 매번 맞춰야 한다 —
-같은 크기 블록만 흘려보내는 env_test 보다 시연 데이터가 풍부해진다.
+정상 통조림 5종만 벨트를 타고 흘러온다. 높이가 32~58mm 로 제각각이라 파지 높이를
+매번 맞춰야 하고, 그만큼 시연 데이터에 변화가 생긴다. 결함이 있는 물건은 하나도
+나오지 않으므로, 여기서 모은 시연으로 학습한 정책은 파열품을 본 적이 없다.
 
 실행:
-    ./scripts/sim_start.sh env_cans
+    ./scripts/sim_start.sh task3_train_pick_and_place_can
 
 파일 순서가 중요하다. Isaac Sim(Kit)은 AppLauncher 로 앱을 띄운 뒤에야
 isaaclab/robolab 모듈을 import 할 수 있어서, 아래 순서를 지켜야 한다.
@@ -26,9 +26,9 @@ from isaaclab.app import AppLauncher  # noqa: E402
 from franka_env.cli import build_parser  # noqa: E402
 
 parser = build_parser(
-    description="컨베이어 통조림 분류 환경",
-    task="CanSortingTask",
-    camera="behind",
+    description="task3 학습 환경 (정상품만)",
+    task="Task3TrainPickPlaceCanTask",
+    view="behind",
     conveyor="script",
 )
 AppLauncher.add_app_launcher_args(parser)
@@ -44,7 +44,7 @@ from franka_env.world_assets import CanSortingWorldCfg  # noqa: E402
 
 if __name__ == "__main__":
     try:
-        # 이 환경은 창고·컨베이어에 더해 담을 통(grey_bin)까지 스폰한다.
+        # 창고·컨베이어에 더해 담을 통(grey_bin)까지 스폰한다.
         run(args_cli, simulation_app, world_cfg=CanSortingWorldCfg)
     except Exception:
         sys.exit(1)
