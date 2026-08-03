@@ -11,7 +11,7 @@
     발행  /franka/cmd/eef_delta  /franka/cmd/gripper
 
 실행:
-    data_collection/task3/run.sh --episodes 20     # _data/task3_train 에 저장
+    data_collection/task3/run.sh --episodes 20     # _data/task3/<날짜시간> 에 저장
 
 에피소드는 "집어서 통에 담기" 한 번이다. 도중에 목표 캔이 회수되거나 시간이 초과되면
 그 에피소드는 **버린다** — 실패 시연이 섞이면 학습이 흐려진다. 성공했더라도 다른
@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import sys
 import threading
 import time
@@ -40,16 +39,9 @@ from std_msgs.msg import Bool, Float32, String          # noqa: E402
 from lerobot_writer import LeRobotWriter                # noqa: E402
 from policy import PickPlacePolicy                      # noqa: E402
 
-# 자연어 명령 — 에피소드마다 하나를 골라 함께 저장한다 (LeRobot 의 task 필드).
-# 같은 동작에 표현이 하나뿐이면 VLA 가 그 문장에 과적합해, 조금만 다르게 말해도
-# 못 알아듣는다. env/src/tasks/task3_*_task.py 의 instruction 변형과 같은 취지다.
-INSTRUCTIONS = [
-    "Pick up the cans from the conveyor and put them in the bin",
-    "Move the cans into the bin",
-    "Grasp each can as it travels along the conveyor belt and place it inside the grey bin on the table",
-    "Pick the can off the conveyor belt and drop it into the grey bin",
-    "Take the cans coming down the conveyor and collect them in the bin",
-]
+# 자연어 명령 — 태스크 전체가 한 문장을 쓴다 (LeRobot 의 task 필드,
+# meta/tasks.jsonl 에 실린다).
+TASK_TEXT = "Pick up the cans from the conveyor and put them in the bin"
 CAMERAS = ("front", "wrist")
 EPISODE_TIMEOUT_S = 150.0
 
@@ -186,10 +178,10 @@ def main() -> int:
     ap.add_argument("--episodes", type=int, default=10,
                     help="최종 데이터셋에 남길 에피소드 수. 실패와 느린 이상치를 "
                          "거른 뒤의 개수라, 시도는 이보다 많아질 수 있다.")
-    ap.add_argument("--out", type=str,
-                    default="/workspace/franka_robolab_sim/_data/task3_train",
-                    help="데이터셋 저장 위치. 기본은 저장소 안 _data/ — git 에는 "
-                         "올라가지 않는다(.gitignore).")
+    ap.add_argument("--out", type=str, default=None,
+                    help="데이터셋 저장 위치. 생략하면 _data/task3/<날짜시간> 에 "
+                         "새로 만든다 — 실행마다 데이터셋이 갈리므로 어느 수집분인지 "
+                         "폴더 이름으로 남는다. _data/ 는 git 에 올라가지 않는다.")
     ap.add_argument("--seed", type=int, default=0, help="대상 선택 난수 시드")
     ap.add_argument("--rate", type=float, default=6.0, help="제어 주기 [Hz]")
     ap.add_argument("--max-attempts", type=int, default=0,
@@ -200,6 +192,10 @@ def main() -> int:
                          "죽였다 살릴 필요 없이 매번 같은 조건에서 시작하기 위한 것이다. "
                          "직전 상태를 이어서 보고 싶으면 none.")
     args = ap.parse_args()
+    if args.out is None:
+        from datetime import datetime
+        args.out = ("/workspace/franka_robolab_sim/_data/task3/"
+                    + datetime.now().strftime("%Y%m%d_%H%M%S"))
 
     rclpy.init()
     node = Collector(args)
@@ -233,11 +229,8 @@ def main() -> int:
                   flush=True)
 
     writer = LeRobotWriter(args.out, fps=args.rate, cameras=list(CAMERAS),
-                           state_dim=8, action_dim=7, task=INSTRUCTIONS[0])
+                           state_dim=8, action_dim=7, task=TASK_TEXT)
     policy = PickPlacePolicy(seed=args.seed)
-    # 명령 선택은 대상 선택과 다른 난수열을 쓴다 — 같은 것을 쓰면 명령 분포가
-    # 대상 선택 이력에 끌려간다.
-    lang_rng = random.Random(args.seed + 7919)
     period = 1.0 / args.rate
     saved, attempts, choices = 0, 0, {0: 0, 1: 0}
 
@@ -258,9 +251,6 @@ def main() -> int:
         attempts += 1
         policy.reset()
         writer.discard()
-        # 이 에피소드의 자연어 명령. 시도 시작 시점에 고정한다 — 명령이 행동을
-        # 조건화하는 구조(추후 VLA)와 시점이 같아야 한다.
-        instruction = lang_rng.choice(INSTRUCTIONS)
         ep_t0 = time.time()
         last = {}
         _prev_stage = None
@@ -349,7 +339,7 @@ def main() -> int:
                       f"중앙값 {med:.0f}×{OUTLIER_FACTOR}) (시도 {attempts})", flush=True)
 
         if done:
-            idx = writer.save_episode(task=instruction)
+            idx = writer.save_episode()
             saved += 1
             print(f"[collect] 에피소드 {idx} 저장 — {len(stages)}프레임, "
                   f"시도 {attempts}회, 1번째/2번째 = {choices.get(0,0)}/{choices.get(1,0)}",
