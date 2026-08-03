@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # task3 시연 수집 — 컨테이너 안에서 Isaac 번들 ROS 로 돈다.
 #
-#   ./data_collection/task3/run.sh --episodes 20 --out /workspace/datasets/task3_train
+#   ./data_collection/task3/run.sh --episodes 20            # _data/task3_train 에 저장
+#   ./data_collection/task3/run.sh --episodes 20 --out ...  # 다른 곳에 저장
 #
 # 시뮬레이션이 먼저 떠 있어야 한다: ./scripts/task3_train.sh
 set -euo pipefail

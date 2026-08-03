@@ -43,10 +43,12 @@ class LeRobotWriter:
             (self.root / "videos" / CHUNK / f"observation.images.{cam}").mkdir(
                 parents=True, exist_ok=True)
 
-        # 이어쓰기 — 이미 있는 에피소드 뒤에 붙인다.
+        # 이어쓰기 — 이미 있는 에피소드 뒤에 붙인다. 태스크 문장 목록도 복원해야
+        # 이어 쓸 때 task_index 가 어긋나지 않는다.
         self.episodes = self._load_jsonl("meta/episodes.jsonl")
         self.ep_index = len(self.episodes)
         self.total_frames = sum(e["length"] for e in self.episodes)
+        self.tasks: list[str] = [t["task"] for t in self._load_jsonl("meta/tasks.jsonl")]
 
         self._frames: list[dict] = []
         self._video: dict[str, list[np.ndarray]] = {c: [] for c in self.cameras}
@@ -78,10 +80,20 @@ class LeRobotWriter:
             self._video[c].clear()
 
     # ── 저장 ──────────────────────────────────────────────────────────
-    def save_episode(self) -> int | None:
+    def save_episode(self, task: str | None = None) -> int | None:
+        """버퍼를 에피소드 하나로 저장한다.
+
+        task 는 이 에피소드의 자연어 명령. 생략하면 생성자에서 준 기본 문장이다.
+        같은 동작에 여러 표현을 붙일 수 있도록 문장마다 task_index 를 배정한다 —
+        VLA 가 특정 문장 하나에 과적합하지 않게 하려는 것이다.
+        """
         n = len(self._frames)
         if n == 0:
             return None
+        text = task or self.task
+        if text not in self.tasks:
+            self.tasks.append(text)
+        t_idx = self.tasks.index(text)
         idx = self.ep_index
         cols = {
             "observation.state": [f["observation.state"] for f in self._frames],
@@ -90,7 +102,7 @@ class LeRobotWriter:
             "frame_index": list(range(n)),
             "episode_index": [idx] * n,
             "index": list(range(self.total_frames, self.total_frames + n)),
-            "task_index": [0] * n,
+            "task_index": [t_idx] * n,
         }
         for key in self._frames[0]:
             if key not in cols:
@@ -101,9 +113,10 @@ class LeRobotWriter:
         for cam in self.cameras:
             self._write_video(cam, idx)
 
-        self.episodes.append({"episode_index": idx, "tasks": [self.task], "length": n})
+        self.episodes.append({"episode_index": idx, "tasks": [text], "length": n})
         self._write_jsonl("meta/episodes.jsonl", self.episodes)
-        self._write_jsonl("meta/tasks.jsonl", [{"task_index": 0, "task": self.task}])
+        self._write_jsonl("meta/tasks.jsonl",
+                          [{"task_index": i, "task": t} for i, t in enumerate(self.tasks)])
         self.total_frames += n
         self.ep_index += 1
         self._write_info()
@@ -201,7 +214,7 @@ class LeRobotWriter:
             "robot_type": "franka_robotiq_2f85",
             "total_episodes": len(self.episodes),
             "total_frames": self.total_frames,
-            "total_tasks": 1,
+            "total_tasks": max(1, len(self.tasks)),
             "total_videos": len(self.episodes) * len(self.cameras),
             "total_chunks": 1,
             "chunks_size": 1000,

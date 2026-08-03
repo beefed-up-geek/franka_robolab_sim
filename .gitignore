@@ -8,3 +8,6 @@ output/
 # macOS
 .DS_Store
 ._*
+
+# 수집 데이터셋 — 용량이 커서 git 에 넣지 않는다
+_data/
