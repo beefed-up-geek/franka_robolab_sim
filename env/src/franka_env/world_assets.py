@@ -123,10 +123,10 @@ class CanSortingWorldCfg(WorldAssetsCfg):
 # 원본을 그대로 쓰면 T포즈다. 래퍼는 tools/gen_pose.py 가 굽는다.
 WORKER_USD = str(Path(__file__).resolve().parents[2] / "asset" / "fixtures"
                  / "worker_posed.usda")
-# 도면 v3: 작업자 (0.50, -1.05), 바닥 z=-0.70, 몸이 +y(작업대)를 향하도록 Z 로
-# +90° 회전 (캐릭터 기본 전방이 +x 라는 가정 — 첫 렌더에서 확인 후 조정).
+# 도면 v3: 작업자 (0.50, -1.05), 바닥 z=-0.70. 캐릭터의 로컬 전방은 -Y 다 —
+# Z+90 을 줬더니 +x 를 바라봤다(실측). -y_local → +y_world 는 Z 180° 다.
 WORKER_POS = (0.50, -1.05, -0.70)
-WORKER_ROT = (0.7071068, 0.0, 0.0, 0.7071068)
+WORKER_ROT = (0.0, 0.0, 0.0, 1.0)
 
 # 손바닥 받침 — 핸드오버 판정용 정적 콜라이더. 작업자 뻗은 손 위치(도면 v3:
 # 0.50, -0.45, 0.45)의 10cm 판. 공구를 여기 올려놓으면 성공이다.
