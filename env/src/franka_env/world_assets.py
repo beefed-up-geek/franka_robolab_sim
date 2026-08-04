@@ -125,7 +125,9 @@ WORKER_USD = str(Path(__file__).resolve().parents[2] / "asset" / "fixtures"
                  / "worker_posed.usda")
 # 도면 v3: 작업자 (0.50, -1.05), 바닥 z=-0.70. 캐릭터의 로컬 전방은 -Y 다 —
 # Z+90 을 줬더니 +x 를 바라봤다(실측). -y_local → +y_world 는 Z 180° 다.
-WORKER_POS = (0.50, -1.05, -0.70)
+# y -0.92: 상판 -y 모서리(-0.80)에 가슴이 거의 붙는 거리. 더 붙이면 허벅지가
+# 상판 옆면을 파고든다 (몸 중심에서 몸 앞면까지 ~0.10).
+WORKER_POS = (0.50, -0.92, -0.70)
 WORKER_ROT = (0.0, 0.0, 0.0, 1.0)
 
 @configclass
