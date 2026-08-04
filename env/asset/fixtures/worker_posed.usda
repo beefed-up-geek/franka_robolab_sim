@@ -27,9 +27,9 @@ def "Root" (
 
                 def SkelAnimation "ReceivePose"
                 {
-                    uniform token[] joints = ["RL_BoneRoot/Hip/Waist/Spine01/Spine02/R_Clavicle/R_Upperarm", "RL_BoneRoot/Hip/Waist/Spine01/Spine02/R_Clavicle/R_Upperarm/R_Forearm", "RL_BoneRoot/Hip/Waist/Spine01/Spine02/L_Clavicle/L_Upperarm", "RL_BoneRoot/Hip/Waist/Spine01/Spine02/L_Clavicle/L_Upperarm/L_Forearm", "RL_BoneRoot/Hip/Waist/Spine01/Spine02/L_Clavicle/L_Upperarm/L_Forearm/L_Hand"]
-                    quatf[] rotations = [(0.78977, 0.11117, -0.08921, 0.59668), (0.99938, -0.00629, 0.00037, 0.03613), (0.68572, 0.64157, 0.24054, -0.24561), (0.99663, 0.08159, 0.00046, 0.00830), (0.98053, -0.03456, 0.03317, 0.19047)]
-                    float3[] translations = [(-0.0, 0.135, -0.0), (0.0, 0.276, -0.0), (0.0, 0.1349, 0.0), (0.0, 0.2756, 0.0), (0.0, 0.2201, 0.0)]
+                    uniform token[] joints = ["RL_BoneRoot/Hip/Waist/Spine01/Spine02/L_Clavicle/L_Upperarm", "RL_BoneRoot/Hip/Waist/Spine01/Spine02/L_Clavicle/L_Upperarm/L_Forearm", "RL_BoneRoot/Hip/Waist/Spine01/Spine02/R_Clavicle/R_Upperarm", "RL_BoneRoot/Hip/Waist/Spine01/Spine02/R_Clavicle/R_Upperarm/R_Forearm", "RL_BoneRoot/Hip/Waist/Spine01/Spine02/R_Clavicle/R_Upperarm/R_Forearm/R_Hand"]
+                    quatf[] rotations = [(0.78929, 0.11183, 0.08993, -0.59702), (0.99936, -0.00556, -0.00051, -0.03532), (0.68656, 0.64086, -0.24047, 0.24533), (0.99674, 0.08088, -0.00055, -0.00748), (0.98076, -0.03419, -0.03294, -0.18944)]
+                    float3[] translations = [(0.0, 0.1349, 0.0), (0.0, 0.2756, 0.0), (-0.0, 0.135, -0.0), (0.0, 0.276, -0.0), (-0.0, 0.219, -0.0)]
                     half3[] scales = [(1, 1, 1), (1, 1, 1), (1, 1, 1), (1, 1, 1), (1, 1, 1)]
                 }
             }

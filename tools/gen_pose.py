@@ -110,5 +110,14 @@ if __name__ == "__main__":
                        "R_Upperarm": [("z", 75)], "R_Forearm": [("z", 5)],
                        "L_Upperarm": [("x", 70), ("z", -40)],
                        "L_Forearm": [("x", 10)], "L_Hand": [("z", 15)]},
+        # 오른손 대각선 내밀기 — reach_left 의 좌우 미러. 왼팔은 차렷.
+        # 주의: 앞으로 스윙은 양팔 모두 x "+" 다. 미러는 rest 쿼터니언에 이미
+        # 들어 있어 x 부호는 안 뒤집힌다 — 뒤집었더니 팔이 등 뒤로 꺾였다(실측).
+        # 아래 기울기(z)만 좌우 부호가 반대다.
+        "reach_right": {"_joints": ("L_Upperarm", "L_Forearm",
+                                    "R_Upperarm", "R_Forearm", "R_Hand"),
+                        "L_Upperarm": [("z", -75)], "L_Forearm": [("z", -5)],
+                        "R_Upperarm": [("x", 70), ("z", 40)],
+                        "R_Forearm": [("x", 10)], "R_Hand": [("z", -15)]},
     }
     make(table[cand], sys.argv[2])
