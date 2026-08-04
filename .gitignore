@@ -15,3 +15,4 @@ _model/
 _tool_viewer/
 # robolab 에서 복사하는 대용량 공구 에셋 — tools/fetch_task1_assets.sh 로 재현
 env/asset/objects/tools/
+env/asset/fixtures/worker/

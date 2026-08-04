@@ -13,4 +13,12 @@ cp "$RL/ycb/cordless_drill.usd"    "$DST/cordless_drill/"
 cp -r "$RL/ycb/textures"           "$DST/cordless_drill/textures"
 cp "$RL/ycb/scissors.usd"          "$DST/scissors/"
 cp -r "$RL/ycb/textures"           "$DST/scissors/textures"
-echo "완료: $DST"
+# 작업자 캐릭터 미러 (Isaac People, S3) — worker_posed.usda 래퍼가 참조한다
+W="$(dirname "$DST")/../fixtures/worker"
+mkdir -p "$W/textures"
+B="https://omniverse-content-production.s3.us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/People/Characters/male_adult_construction_01_new"
+wget -q -nc "$B/male_adult_construction_01_new.usd" -P "$W"
+for f in BaseColor Normal ORM; do
+  wget -q -nc "$B/textures/male_adult_construction_01_${f}.png" -P "$W/textures"
+done
+echo "완료: $DST + worker"

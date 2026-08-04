@@ -1,0 +1,38 @@
+#usda 1.0
+(
+    doc = """작업자 — 오른팔을 들어 손을 내민 정지 자세.
+
+    Isaac People 건설작업자에 SkelAnimation 을 얹어 rest(T포즈)의 오른팔 관절만
+    덮어쓴다. 목록에 없는 관절은 rest 그대로다. 회전값은 tools/gen_pose.py 가
+    rest ⊗ 델타로 계산해 굽는다 — 손으로 만지지 말고 생성기를 고칠 것.
+    """
+    defaultPrim = "Root"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def "Root" (
+    prepend references = @./worker/male_adult_construction_01_new.usd@</Root>
+)
+{
+    over "male_adult_construction_01"
+    {
+        over "ManRoot"
+        {
+            over "male_adult_construction_01" (
+                prepend apiSchemas = ["SkelBindingAPI"]
+            )
+            {
+                rel skel:animationSource = </Root/male_adult_construction_01/ManRoot/male_adult_construction_01/ReceivePose>
+
+                def SkelAnimation "ReceivePose"
+                {
+                    uniform token[] joints = ["RL_BoneRoot/Hip/Waist/Spine01/Spine02/R_Clavicle", "RL_BoneRoot/Hip/Waist/Spine01/Spine02/R_Clavicle/R_Upperarm", "RL_BoneRoot/Hip/Waist/Spine01/Spine02/R_Clavicle/R_Upperarm/R_Forearm", "RL_BoneRoot/Hip/Waist/Spine01/Spine02/R_Clavicle/R_Upperarm/R_Forearm/R_Hand"]
+                    quatf[] rotations = [(0.69210, -0.05320, -0.15290, 0.70340), (0.87307, -0.43994, 0.09928, 0.18553), (0.99565, -0.09343, 0.00075, -0.00746), (0.98076, -0.03419, -0.03294, -0.18944)]
+                    float3[] translations = [(-0.061, 0.234, -0.002), (-0.0, 0.135, -0.0), (0.0, 0.276, -0.0), (-0.0, 0.219, -0.0)]
+                    half3[] scales = [(1, 1, 1), (1, 1, 1), (1, 1, 1), (1, 1, 1)]
+                }
+            }
+        }
+    }
+}

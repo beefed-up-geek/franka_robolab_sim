@@ -128,32 +128,32 @@ over "world"
         uniform token subdivisionScheme = "none"
     }
 
-    # ── 공구 3점 — 자세는 robolab tools_sorting.usda 의 물리 안착값 ──────
+    # ── 공구 3점 — 안착 자세 굽기 완료. 자세는 robolab tools_sorting.usda 의 물리 안착값 ──────
     def "hammer_7" (
         prepend payload = @../objects/tools/hammer_7/hammer_7.usd@
     )
     {
-        quatf xformOp:orient = (0.5967781, 0.0762146, 0.03190375, 0.79814124)
+        quatf xformOp:orient = (0.81966, -0.00043, 0.00406, 0.57284)
         float3 xformOp:scale = (1, 1, 1)
-        double3 xformOp:translate = (0.55, -0.20, 0.036)
+        double3 xformOp:translate = (0.4986, -0.1006, 0.019)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
     }
     def "cordless_drill" (
         prepend payload = @../objects/tools/cordless_drill/cordless_drill.usd@
     )
     {
-        quatf xformOp:orient = (0.7071068, 0, 0.7071068, 0)
+        quatf xformOp:orient = (1.0, -0.00028, -0.00107, 0.0)
         float3 xformOp:scale = (1, 1, 1)
-        double3 xformOp:translate = (0.55, 0.0, 0.045)
+        double3 xformOp:translate = (0.6399, 0.06, 0.0308)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
     }
     def "scissors" (
         prepend payload = @../objects/tools/scissors/scissors.usd@
     )
     {
-        quatf xformOp:orient = (1, 0, 0, 0)
+        quatf xformOp:orient = (0.99999, -0.00236, -0.0028, -1e-05)
         float3 xformOp:scale = (1, 1, 1)
-        double3 xformOp:translate = (0.55, 0.20, 0.018)
+        double3 xformOp:translate = (0.48, 0.28, 0.0103)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
     }
 }

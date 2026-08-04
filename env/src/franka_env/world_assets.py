@@ -119,9 +119,10 @@ class CanSortingWorldCfg(WorldAssetsCfg):
 # ── task1: 공구 건네주기 ────────────────────────────────────────────────
 # 작업자 캐릭터는 NVIDIA 공식 People 에셋을 S3 에서 직접 참조한다 (도구 뷰어
 # 렌더에서 원격 참조가 동작함을 확인했다). 정지 자세 오버라이드는 추후 단계.
-WORKER_USD = ("https://omniverse-content-production.s3.us-west-2.amazonaws.com"
-              "/Assets/Isaac/5.1/Isaac/People/Characters"
-              "/male_adult_construction_01_new/male_adult_construction_01_new.usd")
+# 로컬 래퍼 — S3 원본을 참조하며 SkelAnimation 으로 "오른팔 내밀기" 자세를 얹는다.
+# 원본을 그대로 쓰면 T포즈다. 래퍼는 tools/gen_pose.py 가 굽는다.
+WORKER_USD = str(Path(__file__).resolve().parents[2] / "asset" / "fixtures"
+                 / "worker_posed.usda")
 # 도면 v3: 작업자 (0.50, -1.05), 바닥 z=-0.70, 몸이 +y(작업대)를 향하도록 Z 로
 # +90° 회전 (캐릭터 기본 전방이 +x 라는 가정 — 첫 렌더에서 확인 후 조정).
 WORKER_POS = (0.50, -1.05, -0.70)
