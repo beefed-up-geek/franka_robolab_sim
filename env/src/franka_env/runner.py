@@ -209,20 +209,22 @@ def gripper_spread(robot) -> float:
         return 0.0
 
 
-def _grip_status(robot, finger_idx, contact_sensors, env, **extra) -> dict:
+def _grip_status(robot, finger_idx, contact_sensors, env, exploded=False, **extra) -> dict:
     """파지 진단이 붙은 상태 요약.
 
     finger_q  손가락 관절각 [rad]. 0=열림, pi/4(0.785)=완전히 닫힘. 캔을 물면
               그 사이 어딘가에서 멈춘다 — 0.785 에 도달했다면 **아무것도 안 문 것**이다.
     contact   그리퍼-물체 접촉력 크기 [N]. 0 이면 손가락이 캔에 닿지도 않았다.
+    exploded  **디바운스된** 폭주 판정 — 메인 루프의 연속 카운터를 그대로 싣는다.
+              원시 spread 로 매번 다시 판정하면 안 된다: 손상된 링키지는 팔이
+              가속할 때 spread 가 한두 스텝 0.25 를 스치는데, 그걸 그대로 내보냈더니
+              수집기가 시도마다 즉시 포기해 83회 연속 실패했다(실제 폭주는 1회).
     """
     out = dict(extra)
-    # 그리퍼 폭주 감지 — 폐루프 링키지가 발산하면 손가락 링크가 서로 밀려나
-    # 그리퍼가 분해된다(Robotiq 2F-85 의 알려진 문제, IsaacSim #494).
-    # base_link 에서 손가락까지의 거리로 판정한다. 정상은 0.15m 안쪽이다.
+    # spread 원시값은 진단용으로 계속 싣는다 (정상 0.15m 안쪽, IsaacSim #494).
     _spread = gripper_spread(robot)
     out["grip_spread"] = round(_spread, 4)
-    out["exploded"] = _spread > EXPLODE_SPREAD_M
+    out["exploded"] = bool(exploded)
     if finger_idx is not None:
         out["finger_q"] = round(float(robot.data.joint_pos[0, finger_idx]), 4)
     forces = {}
@@ -578,6 +580,7 @@ def _run(args, simulation_app, world_cfg) -> None:
         defect_pattern=args.defect_pattern,
         defect_ratio=args.defect_ratio,
         spacing=args.spacing if args.spacing is not None else conveyor_mod.INLET_CLEARANCE,
+        jitter=args.belt_jitter,
     )
     if belt.ready:
         print(
@@ -839,10 +842,13 @@ def _run(args, simulation_app, world_cfg) -> None:
                 images=ros_images,
                 status=_grip_status(
                     _robot, _finger_idx, _contact_sensors, env,
+                    exploded=explode_steps >= EXPLODE_STEPS,
                     hz=hz, step=step, recycled=recycled,
                     **{k: belt.status().get(k)
                        for k in ("binned", "off_belt", "queued", "belt_held")},
-                    belt_mpm=state.get_telemetry().get("belt_mpm"),
+                    # 유효 속도(흔들림 반영)를 준다. 기준 속도를 주면 정책의 벨트
+                    # 추종 피드포워드가 빨라진 구간에서 뒤처져 파지점이 밀린다.
+                    belt_mpm=belt.current_mpm(),
                 ),
             )
             ros.spin()

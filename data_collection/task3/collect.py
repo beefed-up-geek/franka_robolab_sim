@@ -215,6 +215,7 @@ def main() -> int:
         print("[collect] 토픽이 오지 않습니다. 시뮬레이션이 떠 있는지 확인하세요.", flush=True)
         return 1
 
+    consec_fail = 0
     if args.reset != "none":
         print(f"[collect] 시뮬레이션 초기화 요청 ({args.reset})…", flush=True)
         if node.request_reset(args.reset):
@@ -253,6 +254,7 @@ def main() -> int:
         writer.discard()
         ep_t0 = time.time()
         last = {}
+        exploded_abort = False
         _prev_stage = None
         binned0 = node.status.get("binned", 0)
         done = aborted = False
@@ -307,10 +309,12 @@ def main() -> int:
                 node.events.clear()
                 aborted = True
                 last = {**info, "why": "그리퍼 폭주 — 시뮬레이션이 리셋됨"}
+                exploded_abort = True
                 break
             if node.status.get("exploded"):
                 aborted = True
                 last = {**info, "why": "그리퍼 폭주(링키지 분해)"}
+                exploded_abort = True
                 break
             done = bool(info.get("done"))
             aborted = bool(info.get("abort"))
@@ -339,6 +343,7 @@ def main() -> int:
                       f"중앙값 {med:.0f}×{OUTLIER_FACTOR}) (시도 {attempts})", flush=True)
 
         if done:
+            consec_fail = 0
             idx = writer.save_episode()
             saved += 1
             print(f"[collect] 에피소드 {idx} 저장 — {len(stages)}프레임, "
@@ -364,6 +369,29 @@ def main() -> int:
             writer.discard()
             print(f"[collect] 실패 — {reason} (시도 {attempts})", flush=True)
         node.send([0.0] * 6, False)
+
+        if not done:
+            consec_fail += 1
+
+        if exploded_abort or consec_fail >= 3:
+            # 폭주는 리셋으로도 링키지가 헐거워진 채 남을 수 있다(실측: 이후
+            # spread 가 0.25 를 스치는 깜빡임 지속). full 초기화를 걸고 폭주
+            # 판정이 걷힐 때까지 기다렸다가 다음 시도로 간다 — 안 기다리면
+            # 같은 손상 상태를 시도만 바꿔 가며 소진한다.
+            # 폭주 직후만이 아니라 **원인 불문 3연속 실패**에도 건다. 실측:
+            # 캔이 다른 캔 위에 얹히거나(z=0.30) 입구에서 낙하-회수 루프에 빠져
+            # 위치가 널뛰면, 정책이 그걸 쫓아 왕복하다 타임아웃을 줄줄이 낸다 —
+            # 장면이 엉킨 뒤에는 시도를 바꿔도 소용없고 되돌리는 것만 통한다.
+            why = "폭주 후" if exploded_abort else f"{consec_fail}연속 실패"
+            consec_fail = 0
+            print(f"[collect] {why} 회복 — full 초기화 요청", flush=True)
+            node.request_reset("full")
+            t0 = time.time()
+            while time.time() - t0 < 30:
+                if not node.status.get("exploded") and node.belt_order:
+                    break
+                time.sleep(0.5)
+            time.sleep(2.0)
 
     print(f"[collect] 완료: {saved}개 저장 → {args.out}", flush=True)
     print(f"[collect] 대상 선택 분포 — 첫 번째 {choices.get(0,0)}회 · "

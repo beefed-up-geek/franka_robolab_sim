@@ -59,6 +59,6 @@ class Task3TrainPickPlaceCanTask(Task):
         "vague": "Move the cans into the bin",
         "specific": "Grasp each can as it travels along the conveyor belt and place it inside the grey bin on the table",
     }
-    # 사람이 조작하는 샌드박스라 넉넉히 잡는다 (1시간).
-    episode_length_s: int = 3600
+    # 사람이 조작하는 샌드박스라 넉넉히 잡는다 (24시간 — 1시간이었을 때 장시간 수집 중 매시간 soft 리셋이 시도를 끊었다).
+    episode_length_s: int = 86400
     attributes = ["semantics"]

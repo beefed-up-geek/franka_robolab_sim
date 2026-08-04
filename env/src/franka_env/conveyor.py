@@ -94,10 +94,11 @@ ON_BELT_DX = 0.09                    # 벨트 폭 방향 허용치
 # 결과적으로 벨트 위 간격이 된다. 0.22 면 지름 70mm 통조림 사이에 150mm 쯤
 # 빈 자리가 생긴다.
 #
-# 사용 구간이 0.72m 뿐이라 이 간격에서는 벨트에 3개까지만 올라간다. 그래서 종류를
-# 여러 개 유지하려면 대기열이 필요하다 — 출구를 지난 화물은 테이블 아래
-# STAGING_POS 에 숨겨 두었다가 입구가 비면 하나씩 다시 투입한다.
-INLET_CLEARANCE = 0.22
+# 사용 구간이 0.72m 뿐이라 간격만큼 올라가는 수가 정해진다. 종류를 여러 개
+# 유지하려면 대기열이 필요하다 — 출구를 지난 화물은 테이블 아래 STAGING_POS 에
+# 숨겨 두었다가 입구가 비면 하나씩 다시 투입한다. 0.14 는 task3 확정 조건이다
+# (0.22 에서 줄임 — 벨트가 더 차 보이고, 이웃 캔 간섭은 실측 0이었다).
+INLET_CLEARANCE = 0.14
 
 # 담는 통. 여기 들어간 화물은 사라져 대기열로 돌아간다 — 안 그러면 통이 넘치고,
 # 사람이 계속 조작하는 샌드박스에서 얼마 못 가 담을 곳이 없어진다.
@@ -160,6 +161,7 @@ class Conveyor:
         defect_pattern: str = "burst",
         defect_ratio: float = 0.2,
         spacing: float = INLET_CLEARANCE,
+        jitter: float = 0.0,
     ) -> None:
         """
         Args:
@@ -168,9 +170,19 @@ class Conveyor:
                 (`corn_can_burst` 처럼 접미사를 붙여 두면 된다).
             defect_ratio: 투입되는 화물 중 불량품 비율 (0~1).
             spacing: 입구 근처에 이 거리 안으로 다른 화물이 있으면 투입을 미룬다.
+            jitter: 벨트 속도를 기준의 ±이 비율 안에서 천천히 흔든다 (0=끔).
+                실물 컨베이어도 부하에 따라 속도가 일렁이고, 정확히 일정한
+                속도만 본 정책은 그 변주에 약하다.
         """
+        import random as _random
+
         self.env = env
         self.speed = speed
+        self.jitter = max(0.0, jitter)
+        self._jr = _random.Random()          # 흔들림 전용 — 재현성보다 다양성이 목적
+        self._mult = 1.0                     # 현재 속도 배율
+        self._mult_target = 1.0
+        self._jitter_countdown = 0
         self.enabled = True
         self.mode = mode
         self.defect_ratio = max(0.0, min(1.0, defect_ratio))
@@ -559,6 +571,32 @@ class Conveyor:
         except Exception:                                  # noqa: BLE001
             return False
 
+    def _update_jitter(self) -> None:
+        """속도 배율을 목표로 조금씩 끌고 가고, 주기가 끝나면 새 목표를 뽑는다.
+
+        목표를 4초쯤마다 갈고 스텝마다 5% 씩 다가가므로 속도는 계단이 아니라
+        완만한 물결이 된다 — 급변시키면 벨트 위 캔이 통째로 순간이동한 것처럼
+        보인다 (위치를 직접 쓰는 script 구동의 특성).
+        """
+        if self.jitter <= 0.0:
+            return
+        if self._jitter_countdown <= 0:
+            self._mult_target = 1.0 + self._jr.uniform(-self.jitter, self.jitter)
+            self._jitter_countdown = 50      # 구동 ~13Hz 기준 약 4초
+        self._jitter_countdown -= 1
+        self._mult += (self._mult_target - self._mult) * 0.05
+
+    def effective_speed(self) -> float:
+        """흔들림이 반영된 현재 속도 [m/s]. 꺼져 있으면 0."""
+        if not self.enabled:
+            return 0.0
+        return self.speed * self._mult
+
+    def current_mpm(self) -> float:
+        """현재 유효 속도 [m/분] — 정책의 벨트 추종 피드포워드가 이걸 봐야
+        흔들리는 속도를 따라간다. 기준 속도를 주면 빨라진 구간에서 뒤처진다."""
+        return round(self.effective_speed() * 60.0, 2)
+
     def drive(self) -> int:
         """스크립트 모드에서만 — 벨트에 얹힌 블록을 이번 스텝만큼 전진시킨다.
 
@@ -577,10 +615,12 @@ class Conveyor:
         if self._held:
             return 0
 
+        self._update_jitter()
         origin = self.env.scene.env_origins[0]
         device = self.env.device
         dt = getattr(self.env, "step_dt", None) or (1.0 / 15.0)
-        advance = self.speed * dt
+        speed = self.effective_speed()
+        advance = speed * dt
         driven = 0
 
         for name in self._items:
@@ -606,7 +646,7 @@ class Conveyor:
             obj.write_root_pose_to_sim(pose)
 
             vel = torch.zeros((1, 6), device=device)
-            vel[0, 1] = self.speed
+            vel[0, 1] = speed
             obj.write_root_velocity_to_sim(vel)
             driven += 1
 

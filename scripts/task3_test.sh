@@ -10,8 +10,8 @@
 #   ./scripts/task3_test.sh              # 이 조건 그대로
 #   ./scripts/task3_test.sh --belt-speed 2  # 한 번만 다르게 (뒤에 준 인자가 이긴다)
 # 조건:
-#   --belt-speed 1    벨트 속도 [m/분]
-#   --spacing 0.11      화물 간격 [m]
+#   --belt-speed 1.5  벨트 속도 [m/분]
+#   --spacing 0.14      화물 간격 [m]
 #   --defect-ratio 0.2  투입 화물 중 불량품 비율. 장기 평균으로만 맞는다
 #   --grip-force 25     그리퍼 관절 힘 상한 [Nm]. USD 기본은 링키지가 5Nm 인데
 #                       그것으로는 0.35~0.5kg 통조림을 한 번도 못 집었다(실측 0/6).
@@ -19,12 +19,13 @@
 #                       분해된다(IsaacSim #494 의 알려진 미해결 문제).
 set -euo pipefail
 
-echo "[task3-test] 정상 4종 + 불량 4종 · 불량 20% · 벨트 1 m/분 · 간격 0.11m"
+echo "[task3-test] 정상 4종 + 불량 4종 · 불량 20% · 벨트 1.5 m/분 · 간격 0.14m"
 
 exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sim_start.sh" \
     task3_test_pick_and_place_can \
-    --belt-speed 1   \
-    --spacing 0.11     \
+    --belt-speed 1.5 \
+    --spacing 0.14     \
     --defect-ratio 0.2 \
+    --belt-jitter 0.15 \
     --grip-force 25  \
     "$@"

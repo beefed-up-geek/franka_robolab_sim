@@ -78,6 +78,11 @@ def build_parser(
         help="화물 사이 간격 [m]. 입구 근처에 이 거리 안으로 화물이 있으면 투입을 미룬다.",
     )
     parser.add_argument(
+        "--belt-jitter", type=float, default=0.15, metavar="0~1",
+        help="벨트 속도를 기준의 ±이 비율 안에서 천천히 흔든다 (0=일정 속도, 기본 0.15). "
+             "실물 컨베이어의 부하 변동을 흉내 내 데이터에 속도 변주를 넣는다.",
+    )
+    parser.add_argument(
         "--grip-force", type=float, default=25.0, metavar="NM",
         help="그리퍼 관절 힘 상한 [Nm]. USD 기본은 finger_joint 16.5 / 링키지 5.0 이고 "
              "링키지 쪽이 실제 병목이다. 올리면 무거운 물체를 잡지만 폐루프 링키지가 "

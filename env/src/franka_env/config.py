@@ -88,9 +88,9 @@ CAM_ZOOM_SENS = 0.0015              # 휠 1단위 당 거리 변화 비율
 # 실물 컨베이어는 분당 미터로 말하는 것이 관례라 단계도 m/분 으로 잡았다.
 # 도면 FRS-CV-001 의 모터 정격 50rpm 이 6.6 m/분(0.110 m/s) 이므로,
 # 기본값 2 m/분 은 정격의 약 30% — 사람이 여유 있게 집을 수 있는 속도다.
-BELT_SPEED_MPM = [0.0, 2.0, 4.0, 6.0]                    # m/분
+BELT_SPEED_MPM = [0.0, 1.5, 3.0, 6.0]                    # m/분
 BELT_SPEED_LEVELS = [v / 60.0 for v in BELT_SPEED_MPM]   # 내부 계산은 m/s
-BELT_SPEED_DEFAULT_INDEX = 1                             # 2 m/분 = 0.033 m/s
+BELT_SPEED_DEFAULT_INDEX = 1                             # 1.5 m/분 — task3 확정 조건
 
 # ── 영상 스트림 ─────────────────────────────────────────────────────────
 STREAM_JPEG_QUALITY = 75
