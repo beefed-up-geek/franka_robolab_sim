@@ -103,5 +103,12 @@ if __name__ == "__main__":
         "attention": {"_joints": ("R_Upperarm", "R_Forearm", "L_Upperarm", "L_Forearm"),
                       "R_Upperarm": [("z", 75)], "R_Forearm": [("z", 5)],
                       "L_Upperarm": [("z", -75)], "L_Forearm": [("z", -5)]},
+        # 왼손 대각선 내밀기 — 왼팔을 앞으로 70° 스윙(x, 오른팔의 미러 부호)
+        # 하고 40° 아래로 기울인다. 오른팔은 차렷 그대로.
+        "reach_left": {"_joints": ("R_Upperarm", "R_Forearm",
+                                   "L_Upperarm", "L_Forearm", "L_Hand"),
+                       "R_Upperarm": [("z", 75)], "R_Forearm": [("z", 5)],
+                       "L_Upperarm": [("x", 70), ("z", -40)],
+                       "L_Forearm": [("x", 10)], "L_Hand": [("z", 15)]},
     }
     make(table[cand], sys.argv[2])
