@@ -8,13 +8,22 @@ REST = {  # (w,x,y,z), 로컬 translate
     "R_Upperarm": ((0.9898, 0.1425, -0.0031, -0.0074), (-0.000, 0.135, -0.000)),
     "R_Forearm":  ((1.0000, -0.0063, 0.0001, -0.0075), (0.000, 0.276, -0.000)),
     "R_Hand":     ((0.9971, -0.0382, -0.0282, -0.0598), (-0.000, 0.219, -0.000)),
+    "L_Clavicle": ((-0.69324, 0.05419, -0.15347, 0.70209), (0.061, 0.2345, -0.0017)),
+    "L_Upperarm": ((0.98963, 0.14347, 0.00327, 0.00684), (0.0, 0.1349, 0.0)),
+    "L_Forearm":  ((0.99995, -0.00558, -0.00027, 0.00831), (0.0, 0.2756, 0.0)),
+    "L_Hand":     ((0.997, -0.03859, 0.02838, 0.06086), (0.0, 0.2201, 0.0)),
 }
-BASE = "RL_BoneRoot/Hip/Waist/Spine01/Spine02/R_Clavicle"
+RBASE = "RL_BoneRoot/Hip/Waist/Spine01/Spine02/R_Clavicle"
+LBASE = "RL_BoneRoot/Hip/Waist/Spine01/Spine02/L_Clavicle"
 PATHS = {
-    "R_Clavicle": BASE,
-    "R_Upperarm": BASE + "/R_Upperarm",
-    "R_Forearm":  BASE + "/R_Upperarm/R_Forearm",
-    "R_Hand":     BASE + "/R_Upperarm/R_Forearm/R_Hand",
+    "R_Clavicle": RBASE,
+    "R_Upperarm": RBASE + "/R_Upperarm",
+    "R_Forearm":  RBASE + "/R_Upperarm/R_Forearm",
+    "R_Hand":     RBASE + "/R_Upperarm/R_Forearm/R_Hand",
+    "L_Clavicle": LBASE,
+    "L_Upperarm": LBASE + "/L_Upperarm",
+    "L_Forearm":  LBASE + "/L_Upperarm/L_Forearm",
+    "L_Hand":     LBASE + "/L_Upperarm/L_Forearm/L_Hand",
 }
 
 def qmul(a, b):
@@ -32,7 +41,7 @@ def axis_q(axis, deg):
 
 def make(deltas: dict, out: str) -> None:
     joints, rots, trs = [], [], []
-    for name in ("R_Clavicle", "R_Upperarm", "R_Forearm", "R_Hand"):
+    for name in deltas.get("_joints", ("R_Clavicle", "R_Upperarm", "R_Forearm", "R_Hand")):
         q, t = REST[name]
         for axis, deg in deltas.get(name, []):
             q = qmul(q, axis_q(axis, deg))
@@ -86,9 +95,13 @@ if __name__ == "__main__":
     # 후보: 이름=축각도리스트  예) A: Upperarm z-70
     cand = sys.argv[1]
     table = {
-        "A": {"R_Upperarm": [("z", -70)], "R_Forearm": [("z", -15)]},
-        "B": {"R_Upperarm": [("z", 70)], "R_Forearm": [("z", 15)]},
-        "C": {"R_Upperarm": [("x", -70)], "R_Forearm": [("x", -15)]},
-        "D": {"R_Upperarm": [("x", 70)], "R_Forearm": [("x", 15)]},
+        # 손 내밀기 (핸드오버) — 오른팔 앞 70° + 아래 25°
+        "reach": {"R_Upperarm": [("x", -70), ("z", 25)],
+                  "R_Forearm": [("x", -10)], "R_Hand": [("z", -15)]},
+        # 차렷 — 양팔 내림. T포즈에서 어깨를 몸통 쪽으로 75° 내린다.
+        # (오른팔은 z+, 왼팔은 미러라 z- 방향이 "아래" — 렌더로 확정)
+        "attention": {"_joints": ("R_Upperarm", "R_Forearm", "L_Upperarm", "L_Forearm"),
+                      "R_Upperarm": [("z", 75)], "R_Forearm": [("z", 5)],
+                      "L_Upperarm": [("z", -75)], "L_Forearm": [("z", -5)]},
     }
     make(table[cand], sys.argv[2])
