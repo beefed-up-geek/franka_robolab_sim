@@ -128,11 +128,6 @@ WORKER_USD = str(Path(__file__).resolve().parents[2] / "asset" / "fixtures"
 WORKER_POS = (0.50, -1.05, -0.70)
 WORKER_ROT = (0.0, 0.0, 0.0, 1.0)
 
-# 손바닥 받침 — 핸드오버 판정용 정적 콜라이더. 작업자 뻗은 손 위치(도면 v3:
-# 0.50, -0.45, 0.45)의 10cm 판. 공구를 여기 올려놓으면 성공이다.
-PALM_POS = (0.50, -0.45, 0.45)
-
-
 @configclass
 class Task1HandoverWorldCfg:
     """창고 + 작업자 + 손바닥 받침. 컨베이어·통은 없다."""
@@ -158,14 +153,6 @@ class Task1HandoverWorldCfg:
         init_state=AssetBaseCfg.InitialStateCfg(pos=WORKER_POS, rot=WORKER_ROT),
     )
 
-    palm_rest = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/palm_rest",
-        spawn=sim_utils.CuboidCfg(
-            size=(0.10, 0.10, 0.012),
-            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.85, 0.66, 0.55), roughness=0.8,
-            ),
-        ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=PALM_POS),
-    )
+    # 손바닥 받침은 두지 않는다. 핸드오버 판정은 받침 안착이 아니라 "공구가
+    # 노란 테이프(y=-0.40)를 넘어 작업자 구역에 들어오면 성공 후 초기화" 로
+    # 간다 — 차렷 자세가 기본이라 받침만 공중에 떠 보이는 문제도 없어진다.
