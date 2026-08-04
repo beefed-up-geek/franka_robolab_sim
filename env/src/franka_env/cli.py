@@ -14,7 +14,7 @@ import argparse
 # config.VIEW_PRESETS 와 **손으로 맞춰야 한다.** 이 모듈은 Isaac Sim 을 띄우기 전에
 # import 되므로 franka_env.config 밖의 것을 불러올 수 없다.
 VIEW_CHOICES = ("behind", "front")
-CONVEYOR_MODES = ("script", "force", "surface")
+CONVEYOR_MODES = ("script", "force", "surface", "none")
 
 
 def build_parser(
@@ -56,6 +56,7 @@ def build_parser(
         default=conveyor,
         choices=CONVEYOR_MODES,
         help="script=위치를 직접 전진(기본, 이 환경에서 유일하게 동작). "
+             "none=벨트 없는 태스크(task1) — 컨베이어 로직 전체 비활성. "
              "force=외력으로 마찰 흉내 — 외력이 반영되지 않아 동작하지 않는다. "
              "surface=PhysX 표면 속도 — 콜라이더가 깨져 동작하지 않는다.",
     )

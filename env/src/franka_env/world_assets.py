@@ -114,3 +114,57 @@ class CanSortingWorldCfg(WorldAssetsCfg):
         ),
         init_state=AssetBaseCfg.InitialStateCfg(pos=BIN_POS, rot=BIN_ROT),
     )
+
+
+# ── task1: 공구 건네주기 ────────────────────────────────────────────────
+# 작업자 캐릭터는 NVIDIA 공식 People 에셋을 S3 에서 직접 참조한다 (도구 뷰어
+# 렌더에서 원격 참조가 동작함을 확인했다). 정지 자세 오버라이드는 추후 단계.
+WORKER_USD = ("https://omniverse-content-production.s3.us-west-2.amazonaws.com"
+              "/Assets/Isaac/5.1/Isaac/People/Characters"
+              "/male_adult_construction_01_new/male_adult_construction_01_new.usd")
+# 도면 v3: 작업자 (0.50, -1.05), 바닥 z=-0.70, 몸이 +y(작업대)를 향하도록 Z 로
+# +90° 회전 (캐릭터 기본 전방이 +x 라는 가정 — 첫 렌더에서 확인 후 조정).
+WORKER_POS = (0.50, -1.05, -0.70)
+WORKER_ROT = (0.7071068, 0.0, 0.0, 0.7071068)
+
+# 손바닥 받침 — 핸드오버 판정용 정적 콜라이더. 작업자 뻗은 손 위치(도면 v3:
+# 0.50, -0.45, 0.45)의 10cm 판. 공구를 여기 올려놓으면 성공이다.
+PALM_POS = (0.50, -0.45, 0.45)
+
+
+@configclass
+class Task1HandoverWorldCfg:
+    """창고 + 작업자 + 손바닥 받침. 컨베이어·통은 없다."""
+
+    warehouse = AssetBaseCfg(
+        prim_path="/World/background",
+        spawn=sim_utils.UsdFileCfg(usd_path=WAREHOUSE_USD),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=WAREHOUSE_OFFSET),
+    )
+
+    fill_light = AssetBaseCfg(
+        prim_path="/World/fill_light",
+        spawn=sim_utils.DomeLightCfg(
+            intensity=180.0,
+            color=(0.85, 0.87, 0.92),
+            visible_in_primary_ray=False,
+        ),
+    )
+
+    worker = AssetBaseCfg(
+        prim_path="/World/worker",
+        spawn=sim_utils.UsdFileCfg(usd_path=WORKER_USD),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=WORKER_POS, rot=WORKER_ROT),
+    )
+
+    palm_rest = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/palm_rest",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.10, 0.10, 0.012),
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(0.85, 0.66, 0.55), roughness=0.8,
+            ),
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=PALM_POS),
+    )

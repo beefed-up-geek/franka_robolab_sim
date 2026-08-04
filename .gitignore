@@ -12,3 +12,6 @@ output/
 # 수집 데이터셋 — 용량이 커서 git 에 넣지 않는다
 _data/
 _model/
+_tool_viewer/
+# robolab 에서 복사하는 대용량 공구 에셋 — tools/fetch_task1_assets.sh 로 재현
+env/asset/objects/tools/

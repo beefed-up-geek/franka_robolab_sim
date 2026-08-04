@@ -1,0 +1,159 @@
+#usda 1.0
+(
+    doc = """task1 씬 — 공구 건네주기 (도면 v3).
+
+    고정 설비는 task3 와 같은 _can_workcell.usda(작업대·바닥)를 서브레이어로 쓴다.
+    컨베이어·통은 애초에 씬이 아니라 world_assets 스폰이므로 여기 없고, task1 은
+    Task1HandoverWorldCfg 가 창고·작업자·손바닥 받침만 스폰한다.
+
+    좌표 근거 (도면 v3):
+      워크스페이스 매트  x 0.35~0.75, y -0.35~0.35, 상판 위 3mm (콜라이더 있음)
+      작업자 구역        y -0.80~-0.40 — 면 전체를 옅은 사선으로 칠한다
+      경계 테이프        y -0.425~-0.375 (50mm), 상판 전장 — 노랑/검정 사선
+      공구 3점           x 0.55, y -0.20 / 0 / +0.20 (자세는 robolab
+                         tools_sorting.usda 의 물리 안착값을 그대로 가져왔다)
+
+    공구가 경계(y=-0.40)를 넘으면 초기 위치로 되돌리는 로직은 런타임(runner)
+    쪽에 붙는다 — 씬은 경계의 시각 표기만 담당한다.
+    """
+    subLayers = [
+        @./_can_workcell.usda@
+    ]
+    defaultPrim = "world"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+over "world"
+{
+    def Scope "Task1Looks"
+    {
+        def Material "MatWhite"
+        {
+            token outputs:mdl:displacement.connect = </world/Task1Looks/MatWhite/Shader.outputs:out>
+            token outputs:mdl:surface.connect = </world/Task1Looks/MatWhite/Shader.outputs:out>
+            token outputs:mdl:volume.connect = </world/Task1Looks/MatWhite/Shader.outputs:out>
+            def Shader "Shader"
+            {
+                uniform token info:implementationSource = "sourceAsset"
+                uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
+                uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+                color3f inputs:diffuse_color_constant = (0.93, 0.93, 0.90)
+                float inputs:reflection_roughness_constant = 0.6
+                token outputs:out (renderType = "material")
+            }
+        }
+        def Material "MatTape"
+        {
+            token outputs:mdl:displacement.connect = </world/Task1Looks/MatTape/Shader.outputs:out>
+            token outputs:mdl:surface.connect = </world/Task1Looks/MatTape/Shader.outputs:out>
+            token outputs:mdl:volume.connect = </world/Task1Looks/MatTape/Shader.outputs:out>
+            def Shader "Shader"
+            {
+                uniform token info:implementationSource = "sourceAsset"
+                uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
+                uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+                color3f inputs:diffuse_color_constant = (0.9, 0.76, 0.12)
+                asset inputs:diffuse_texture = @/workspace/franka_robolab_sim/env/asset/textures/caution_yellow.png@ (
+                    colorSpace = "sRGB"
+                )
+                float inputs:reflection_roughness_constant = 0.5
+                token outputs:out (renderType = "material")
+            }
+        }
+        def Material "MatZone"
+        {
+            token outputs:mdl:displacement.connect = </world/Task1Looks/MatZone/Shader.outputs:out>
+            token outputs:mdl:surface.connect = </world/Task1Looks/MatZone/Shader.outputs:out>
+            token outputs:mdl:volume.connect = </world/Task1Looks/MatZone/Shader.outputs:out>
+            def Shader "Shader"
+            {
+                uniform token info:implementationSource = "sourceAsset"
+                uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
+                uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+                color3f inputs:diffuse_color_constant = (0.9, 0.88, 0.8)
+                asset inputs:diffuse_texture = @/workspace/franka_robolab_sim/env/asset/textures/worker_zone.png@ (
+                    colorSpace = "sRGB"
+                )
+                float inputs:reflection_roughness_constant = 0.7
+                token outputs:out (renderType = "material")
+            }
+        }
+    }
+
+    # ── 흰색 워크스페이스 매트 (3mm, 콜라이더) — 공구가 이 위에 놓인다 ─────
+    def Cube "workspace_mat" (
+        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+    )
+    {
+        rel material:binding = </world/Task1Looks/MatWhite>
+        double3 xformOp:translate = (0.55, 0.0, 0.0015)
+        float3 xformOp:scale = (0.20, 0.35, 0.0015)
+        quatf xformOp:orient = (1, 0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        double size = 2
+    }
+
+    # ── 작업자 구역 면 (시각 전용 Mesh) — Cube 는 UV 가 없어 텍스처가 안 붙는다.
+    #    st 를 직접 넣은 사각 Mesh 로 만들고, 반복은 st 값을 1 위로 키워 처리한다.
+    def Mesh "worker_zone" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        rel material:binding = </world/Task1Looks/MatZone>
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-0.45, -0.80, 0.0006), (1.05, -0.80, 0.0006), (1.05, -0.40, 0.0006), (-0.45, -0.40, 0.0006)]
+        texCoord2f[] primvars:st = [(0, 0), (6, 0), (6, 1.6), (0, 1.6)] (
+            interpolation = "faceVarying"
+        )
+        float3[] extent = [(-0.45, -0.80, 0), (1.05, -0.40, 0.001)]
+        uniform token subdivisionScheme = "none"
+    }
+
+    # ── 경계 주의 테이프 50mm (시각 전용 Mesh) — 색을 바꾸려면 MatTape 의
+    #    texture 를 caution_red.png 로 교체 ────────────────────────────────
+    def Mesh "caution_tape" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        rel material:binding = </world/Task1Looks/MatTape>
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-0.45, -0.425, 0.0012), (1.05, -0.425, 0.0012), (1.05, -0.375, 0.0012), (-0.45, -0.375, 0.0012)]
+        texCoord2f[] primvars:st = [(0, 0), (30, 0), (30, 1), (0, 1)] (
+            interpolation = "faceVarying"
+        )
+        float3[] extent = [(-0.45, -0.425, 0), (1.05, -0.375, 0.002)]
+        uniform token subdivisionScheme = "none"
+    }
+
+    # ── 공구 3점 — 자세는 robolab tools_sorting.usda 의 물리 안착값 ──────
+    def "hammer_7" (
+        prepend payload = @../objects/tools/hammer_7/hammer_7.usd@
+    )
+    {
+        quatf xformOp:orient = (0.5967781, 0.0762146, 0.03190375, 0.79814124)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.55, -0.20, 0.036)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+    def "cordless_drill" (
+        prepend payload = @../objects/tools/cordless_drill/cordless_drill.usd@
+    )
+    {
+        quatf xformOp:orient = (0.7071068, 0, 0.7071068, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.55, 0.0, 0.045)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+    def "scissors" (
+        prepend payload = @../objects/tools/scissors/scissors.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.55, 0.20, 0.018)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+}

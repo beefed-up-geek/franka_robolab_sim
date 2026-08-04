@@ -444,6 +444,8 @@ class Conveyor:
 
         영역을 벗어나는 순간 — 캔을 물고 통 쪽으로 나가기 시작하면 — 다시 돈다.
         """
+        if self.mode == "none":
+            return False
         x, y = float(ee_pos[0]), float(ee_pos[1])
         self._held = abs(x - BELT_X) < HOLD_DX and HOLD_Y[0] < y < HOLD_Y[1]
         return self._held
@@ -464,6 +466,8 @@ class Conveyor:
 
     @property
     def ready(self) -> bool:
+        if self.mode == "none":
+            return False
         if self.mode == "surface":
             return self._belt_found and bool(self._surface_apis)
         return self._belt_found and bool(self._blocks)
@@ -695,7 +699,9 @@ class Conveyor:
         시연이 단조로워진다. 남는 것을 테이블 아래에 숨겨 두었다가 자리가 나면
         투입하면 종류는 그대로 두고 간격만 넓힐 수 있다.
         """
-        if not self._blocks:
+        if self.mode == "none" or not self._blocks:
+            # none: 벨트가 없는 태스크(task1 등). 회수를 돌리면 상판 위 물체가
+            # "벨트 아래로 떨어졌다" 로 오인되어 전부 대기열로 빨려 들어간다.
             return 0
 
         positions = self._positions()
