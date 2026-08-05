@@ -763,6 +763,25 @@ def _run(args, simulation_app, world_cfg) -> None:
         # 출구를 지난 화물을 입구로 되돌려 흐름을 끊기지 않게 한다.
         recycled += belt.recycle()
 
+        # task1(벨트 없음): 공구가 경계 테이프(y=-0.40)를 넘으면 **그 공구만**
+        # 씬 기본 자세로 되돌린다 — 전달 판정이자 다음 시연 준비다. 정책은
+        # 내려놓을 필요 없이 수평으로 들고 선을 넘기만 하면 된다.
+        if belt.mode == "none":
+            _crossed = []
+            _origin = env.scene.env_origins[0]
+            for _name in belt.items:
+                _obj = env.scene[_name]
+                if float(_obj.data.root_pos_w[0, 1] - _origin[1]) < -0.40:
+                    _root = _obj.data.default_root_state.clone()
+                    _root[:, :3] += env.scene.env_origins
+                    _obj.write_root_pose_to_sim(_root[:, :7])
+                    _obj.write_root_velocity_to_sim(torch.zeros_like(_root[:, 7:]))
+                    _obj.reset()
+                    _crossed.append(_name)
+            if _crossed:
+                print(f"[env] 경계 통과 — 초기화: {_crossed}", flush=True)
+                ros.event("tool_crossed", step=step, tools=_crossed)
+
         # 제어 주파수 측정 (1초 창)
         hz_step += 1
         now = time.monotonic()

@@ -28,10 +28,11 @@ SCENE_PATH = str(
 )
 
 # import_scene 이 이 목록의 프림만 씬 엔티티로 만든다 (task3 와 동일 규칙).
+# 가위는 뺐다 — 두께 15mm 라 패드가 거의 다 닫힌 채 마찰로만 물려서, 운반 중
+# 미끄러져 빠진다(실측: 접촉력 0 인 채 반쯤 가다 낙하). 집을 수 있는 공구만 남긴다.
 TOOLS = [
     "hammer_7",          # HANDAL 망치 — 손잡이 파지
     "cordless_drill",    # YCB 무선드릴 — 가장 부피가 큼
-    "scissors",          # YCB 가위 — 납작해서 파지 높이가 낮다
 ]
 
 CONTACT_OBJECTS = [*TOOLS, "table"]

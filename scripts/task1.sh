@@ -10,4 +10,5 @@ echo "[task1] 공구 3종 · 작업자 핸드오버 · 주의 테이프 구역"
 exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sim_start.sh" \
     task1_tool_handover \
     --grip-force 25 \
+    --can-mass 0.05 \
     "$@"
