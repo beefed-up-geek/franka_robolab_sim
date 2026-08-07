@@ -68,6 +68,29 @@ def Xform "world"
                 token outputs:out (renderType = "material")
             }
         }
+
+        def Material "Wood_Oak"
+        {
+            token outputs:mdl:displacement.connect = </world/Looks/Wood_Oak/Shader.outputs:out>
+            token outputs:mdl:surface.connect = </world/Looks/Wood_Oak/Shader.outputs:out>
+            token outputs:mdl:volume.connect = </world/Looks/Wood_Oak/Shader.outputs:out>
+
+            def Shader "Shader"
+            {
+                uniform token info:implementationSource = "sourceAsset"
+                uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
+                uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+                asset inputs:diffuse_texture = @../textures/wood_oak_basecolor.png@ (
+                    colorSpace = "sRGB"
+                )
+                bool inputs:project_uvw = 1
+                bool inputs:world_or_object = 0
+                float2 inputs:texture_scale = (1, 1)
+                float inputs:reflection_roughness_constant = 0.5
+                float inputs:specular_level = 0.2
+                token outputs:out
+            }
+        }
     }
 
     def Material "PhysicsMaterial" (
@@ -80,62 +103,55 @@ def Xform "world"
         uniform token physxMaterial:frictionCombineMode = "max"
     }
 
-    # -- 흰색 작업대 -----------------------------------------------------
+    # -- RoboLab 오크 테이블 ---------------------------------------------
     # 프림 이름은 반드시 "table" 이어야 한다 (RoboLab 접촉 센서 규약).
-    def Cube "table" (
-        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+    # robolab assets/fixtures/table_oak.usd (오크 상판 3cm + 금속 원기둥 다리,
+    # 충돌체 포함) 를 기존 흰 작업대와 같은 발자국(x -0.45..1.05, y ±0.8,
+    # 상판 z=0, 바닥 -0.70)으로 스케일했다. 재질은 클라우드 vMaterials
+    # (Oak·RustedMetal) — 첫 로드에 다운로드된다 (컨테이너 외부망 확인됨).
+    def "table" (
+        prepend references = @../../../../robolab/assets/fixtures/table_oak.usd@
     )
     {
-        double size = 2
-        float3 xformOp:scale = (0.75, 0.8, 0.025)
-        double3 xformOp:translate = (0.3, 0, -0.025)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-        rel material:binding = </world/Looks/White_Matte> (
+        # 에셋 루트에 PhysicsRigidBodyAPI 가 켜져 있다(동적!) — 정적 콜라이더로
+        # 끈다. 안 끄면 로봇이 누르는 힘에 책상째 밀린다.
+        bool physics:rigidBodyEnabled = 0
+        double3 xformOp:translate = (0.3, 0, -0.35)
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (2.142857, 1.6, 1)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        rel material:binding:physics = </world/PhysicsMaterial> (
             bindMaterialAs = "strongerThanDescendants"
         )
-        rel material:binding:physics = </world/PhysicsMaterial>
+
+        # 상판 콜라이더에 직접 바인딩 — 에셋이 top 에 자체 시각 재질을 갖고
+        # 있어, 루트의 물리 바인딩만으로는 기본 저마찰로 풀린다 (실측:
+        # 플러그가 파지 중 미끄러짐).
+        over "table_01"
+        {
+            over "top"
+            {
+                rel material:binding:physics = </world/PhysicsMaterial>
+            }
+        }
+
+        # Oak 렌더 재질에 물리 속성을 직접 얹는다 — 콜라이더가 자체 시각
+        # 재질을 바인딩하고 있어 이 경로가 가장 확실하다 (RoboLab 원본에는
+        # 물리 재질이 아예 없어 기본 마찰 0.5 로 풀린다, 실측).
+        over "Looks"
+        {
+            over "Oak" (
+                prepend apiSchemas = ["PhysicsMaterialAPI", "PhysxMaterialAPI"]
+            )
+            {
+                float physics:staticFriction = 1.1
+                float physics:dynamicFriction = 0.9
+                float physics:restitution = 0
+                uniform token physxMaterial:frictionCombineMode = "max"
+            }
+        }
     }
 
-    def Xform "table_legs"
-    {
-        quatf xformOp:orient = (1, 0, 0, 0)
-        float3 xformOp:scale = (1, 1, 1)
-        double3 xformOp:translate = (0, 0, 0)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
-
-        def Cube "LegFrontLeft" (prepend apiSchemas = ["MaterialBindingAPI"])
-        {
-            double size = 2
-            float3 xformOp:scale = (0.035, 0.035, 0.3235)
-            double3 xformOp:translate = (0.95, 0.7, -0.3735)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            rel material:binding = </world/Looks/White_Matte> (bindMaterialAs = "strongerThanDescendants")
-        }
-        def Cube "LegFrontRight" (prepend apiSchemas = ["MaterialBindingAPI"])
-        {
-            double size = 2
-            float3 xformOp:scale = (0.035, 0.035, 0.3235)
-            double3 xformOp:translate = (0.95, -0.7, -0.3735)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            rel material:binding = </world/Looks/White_Matte> (bindMaterialAs = "strongerThanDescendants")
-        }
-        def Cube "LegBackLeft" (prepend apiSchemas = ["MaterialBindingAPI"])
-        {
-            double size = 2
-            float3 xformOp:scale = (0.035, 0.035, 0.3235)
-            double3 xformOp:translate = (-0.35, 0.7, -0.3735)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            rel material:binding = </world/Looks/White_Matte> (bindMaterialAs = "strongerThanDescendants")
-        }
-        def Cube "LegBackRight" (prepend apiSchemas = ["MaterialBindingAPI"])
-        {
-            double size = 2
-            float3 xformOp:scale = (0.035, 0.035, 0.3235)
-            double3 xformOp:translate = (-0.35, -0.7, -0.3735)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-            rel material:binding = </world/Looks/White_Matte> (bindMaterialAs = "strongerThanDescendants")
-        }
-    }
 
     def Xform "GroundPlane"
     {

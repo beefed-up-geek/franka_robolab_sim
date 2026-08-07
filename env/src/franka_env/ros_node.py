@@ -15,6 +15,7 @@ PYTHONPATH·LD_LIBRARY_PATH 를 잡아 줘야 import 된다 — scripts/sim_star
                                 (그리퍼 폭주 등 — 구독자가 그 구간 데이터를 버릴 수 있게)
     /franka/camera/front/image_raw/compressed   sensor_msgs/CompressedImage
     /franka/camera/wrist/image_raw/compressed   sensor_msgs/CompressedImage
+    /franka/camera/top/image_raw/compressed     sensor_msgs/CompressedImage
 
     /franka/cmd/eef_delta       geometry_msgs/Twist         EEF 델타 (구독)
     /franka/cmd/gripper         std_msgs/Bool               True=닫기 (구독)
@@ -88,7 +89,7 @@ class RosBridge:
             name: self._node.create_publisher(
                 CompressedImage, f"{ns}/camera/{name}/image_raw/compressed", 2
             )
-            for name in ("front", "wrist", "view")
+            for name in ("front", "top", "wrist", "view")
         }
 
         self._node.create_subscription(Twist, f"{ns}/cmd/eef_delta", self._on_delta, q)

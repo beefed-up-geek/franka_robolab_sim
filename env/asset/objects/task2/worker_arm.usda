@@ -1,0 +1,114 @@
+#usda 1.0
+(
+    doc = """task2 test — 작업자 팔 (팔꿈치~손, 침입 장애물).
+
+    원점이 팔꿈치(절단면 = 걷어올린 소매 커프), 기하는 -X 로 뻗는다:
+    커프 -> 맨 팔뚝(피부) -> 손목 -> 손바닥 -> 손가락 4개 + 엄지.
+    손바닥 중심 x -0.385, 손끝 x -0.52 (실측 팔꿈치~손끝 ~0.47m 급).
+    runner 의 ArmIntruder 가 매 스텝 자세를 기록해 앞뒤(x축) 수평 진입을
+    구동한다. 동적 강체지만 매 스텝 재기록으로 사실상 킨매틱 (킨매틱
+    플래그는 프레임워크가 RigidObject 로 등록하지 않아 쓰지 않는다).
+    손가락·엄지는 얇아 충돌체를 빼고 시각 전용 — 충돌은 팔뚝·손바닥 담당."""
+    defaultPrim = "worker_arm"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "worker_arm" (
+    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+)
+{
+    float physics:mass = 2.0
+
+    def Cylinder "sleeve_cuff" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        uniform token axis = "X"
+        double radius = 0.052
+        double height = 0.05
+        color3f[] primvars:displayColor = [(0.16, 0.21, 0.34)]
+        double3 xformOp:translate = (-0.025, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+    def Capsule "forearm_skin" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        uniform token axis = "X"
+        double radius = 0.042
+        double height = 0.16
+        color3f[] primvars:displayColor = [(0.8, 0.6, 0.47)]
+        double3 xformOp:translate = (-0.155, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+    def Capsule "wrist"
+    {
+        uniform token axis = "X"
+        double radius = 0.033
+        double height = 0.05
+        color3f[] primvars:displayColor = [(0.79, 0.59, 0.46)]
+        double3 xformOp:translate = (-0.295, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+    def Cube "palm" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.81, 0.6, 0.47)]
+        double3 xformOp:translate = (-0.385, 0, -0.004)
+        float3 xformOp:scale = (0.1, 0.088, 0.03)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+    }
+    def Capsule "finger_index"
+    {
+        uniform token axis = "X"
+        double radius = 0.0105
+        double height = 0.05
+        color3f[] primvars:displayColor = [(0.8, 0.59, 0.46)]
+        double3 xformOp:translate = (-0.472, 0.031, -0.008)
+        float3 xformOp:rotateXYZ = (0, -8, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+    }
+    def Capsule "finger_middle"
+    {
+        uniform token axis = "X"
+        double radius = 0.0108
+        double height = 0.058
+        color3f[] primvars:displayColor = [(0.8, 0.59, 0.46)]
+        double3 xformOp:translate = (-0.478, 0.01, -0.008)
+        float3 xformOp:rotateXYZ = (0, -8, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+    }
+    def Capsule "finger_ring"
+    {
+        uniform token axis = "X"
+        double radius = 0.0102
+        double height = 0.052
+        color3f[] primvars:displayColor = [(0.8, 0.59, 0.46)]
+        double3 xformOp:translate = (-0.474, -0.012, -0.008)
+        float3 xformOp:rotateXYZ = (0, -8, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+    }
+    def Capsule "finger_pinky"
+    {
+        uniform token axis = "X"
+        double radius = 0.0092
+        double height = 0.04
+        color3f[] primvars:displayColor = [(0.8, 0.59, 0.46)]
+        double3 xformOp:translate = (-0.463, -0.033, -0.008)
+        float3 xformOp:rotateXYZ = (0, -8, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+    }
+    def Capsule "thumb"
+    {
+        uniform token axis = "X"
+        double radius = 0.0115
+        double height = 0.04
+        color3f[] primvars:displayColor = [(0.8, 0.59, 0.46)]
+        double3 xformOp:translate = (-0.368, 0.062, -0.006)
+        float3 xformOp:rotateXYZ = (0, 0, 38)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+    }
+}

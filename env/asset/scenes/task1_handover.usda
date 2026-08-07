@@ -81,18 +81,6 @@ over "world"
         }
     }
 
-    # ── 흰색 워크스페이스 매트 (3mm, 콜라이더) — 공구가 이 위에 놓인다 ─────
-    def Cube "workspace_mat" (
-        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
-    )
-    {
-        rel material:binding = </world/Task1Looks/MatWhite>
-        double3 xformOp:translate = (0.55, 0.0, 0.0015)
-        float3 xformOp:scale = (0.20, 0.35, 0.0015)
-        quatf xformOp:orient = (1, 0, 0, 0)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
-        double size = 2
-    }
 
     # ── 작업자 구역 면 (시각 전용 Mesh) — Cube 는 UV 가 없어 텍스처가 안 붙는다.
     #    st 를 직접 넣은 사각 Mesh 로 만들고, 반복은 st 값을 1 위로 키워 처리한다.

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import random
 import json
 import sys
 import threading
@@ -110,13 +111,29 @@ def main() -> int:
     ap.add_argument("--reset", choices=("none", "soft", "hard", "full"), default="full")
     ap.add_argument("--order", type=str, default="red,black",
                     help="연결 순서 (실무 규칙: + 먼저)")
+    ap.add_argument("--seed", type=int, default=None,
+                    help="궤적·속도 샘플링 시드 (기본: 시간 기반)")
+    ap.add_argument("--speed", type=float, default=None,
+                    help="속도 배수 고정 (기본: 0.9~1.5 샘플)")
+    ap.add_argument("--traj", type=int, default=None,
+                    help="궤적 가족 고정 0~13 (기본: 샘플)")
     args = ap.parse_args()
 
     rclpy.init()
     node = Bridge()
     spinner = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
     spinner.start()
+    try:
+        return _run(node, args)
+    finally:
+        # rclpy.spin 데몬 스레드가 살아있는 채로 인터프리터가 내려가면 DDS
+        # 소멸자 경합으로 코어 덤프가 난다 (terminate called ... — 실측).
+        # 컨텍스트를 먼저 닫아 spin 을 끝내고 스레드를 거둔 뒤 나간다.
+        rclpy.try_shutdown()
+        spinner.join(timeout=2.0)
 
+
+def _run(node, args) -> int:
     print("[connect] 시뮬레이션 대기 중…", flush=True)
     t0 = time.time()
     while not node.ready() and time.time() - t0 < 30:
@@ -128,6 +145,10 @@ def main() -> int:
         print(f"[connect] 초기화({args.reset}) 요청…", flush=True)
         node.request_reset(args.reset)
         time.sleep(2.0)
+
+    seed = args.seed if args.seed is not None else int(time.time()) % 1000000
+    print(f"[connect] 시드 {seed}", flush=True)
+    t_all = time.time()
 
     period = 1.0 / args.rate
     seq = [f"connector_{c.strip()}" for c in args.order.split(",")]
@@ -148,8 +169,12 @@ def main() -> int:
             lx, ly, lz = TERMS_LOCAL[name]
             term = [bat["pos"][0] - lx, bat["pos"][1] - ly, bat["pos"][2] + lz]
         pol = "B(+)" if name == "connector_red" else "A(-)"
-        print(f"[connect] {name} → {pol} 단자 {['%.3f' % v for v in term]}", flush=True)
-        policy = Task2ConnectPolicy(name, term)
+        rng = random.Random(seed * 10000 + attempt * 100
+                            + (1 if name == "connector_red" else 2))
+        policy = Task2ConnectPolicy(name, term, rng=rng,
+                                    speed=args.speed, family=args.traj)
+        print(f"[connect] {name} → {pol} 단자 {['%.3f' % v for v in term]} "
+              f"| {policy.describe()}", flush=True)
         node.events.clear()
         attached = False
         t0 = time.time()
@@ -203,7 +228,8 @@ def main() -> int:
     t0 = time.time()
     while time.time() - t0 < 20:
         if any(e.get("type") == "charging_done" for e in node.events):
-            print("[connect] 성공 — 충전 연결 완료, 커넥터 자동 초기화됨", flush=True)
+            print(f"[connect] 성공 — 충전 연결 완료, 커넥터 자동 초기화됨 "
+                  f"(총 {time.time() - t_all:.0f}s)", flush=True)
             node.send([0.0] * 6, False)
             return 0
         time.sleep(0.2)

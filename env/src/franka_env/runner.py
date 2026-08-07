@@ -46,7 +46,8 @@ from robolab.robots.droid import (
 from robolab.variations.lighting import SphereLightCfg
 
 from franka_env import config, safety
-from franka_env.camera import TeleopFrontCameraCfg, TeleopViewCameraCfg
+from franka_env.camera import (TeleopFrontCameraCfg, TeleopTopCameraCfg,
+                               TeleopViewCameraCfg)
 from franka_env import conveyor as conveyor_mod
 from franka_env.conveyor import Conveyor
 from franka_env.grasp import GraspSolver
@@ -54,6 +55,8 @@ from franka_env.ros_node import RosBridge
 from franka_env.state import TeleopState
 from franka_env.web_server import start_in_thread
 from franka_env.world_assets import WorldAssetsCfg
+from franka_env.verlet_wire import Task2Wires
+from franka_env.worker_arm import ArmIntruder
 
 robolab.constants.VERBOSE = False
 robolab.constants.RECORD_IMAGE_DATA = False
@@ -141,9 +144,10 @@ def register_env(task: str, world_cfg) -> None:
     노출하는 래퍼이고 실제 센서는 DroidCfg 가 만든다 — 씬에 다시 넣으면 로봇 프림이
     생기기 전에 스폰을 시도해 "Unable to find source prim path" 로 죽는다.
     """
-    scene_cams = [TeleopViewCameraCfg, TeleopFrontCameraCfg]
+    scene_cams = [TeleopViewCameraCfg, TeleopFrontCameraCfg, TeleopTopCameraCfg]
     ViewportObsCfg = generate_image_obs_from_cameras(
-        [TeleopViewCameraCfg, TeleopFrontCameraCfg, WristCameraCfg]
+        [TeleopViewCameraCfg, TeleopFrontCameraCfg, TeleopTopCameraCfg,
+         WristCameraCfg]
     )
     ObservationCfg = generate_obs_cfg({
         "proprio_obs": ProprioceptionObservationCfg(),
@@ -652,6 +656,8 @@ def _run(args, simulation_app, world_cfg) -> None:
     t2_rope = None     # task2: 로프 링크 뷰 (기본 자세 복원용)
     t2_terms_pub = {}  # task2: ROS status 로 내보낼 단자 월드 좌표
     t2_rope_def = None
+    t2_wires = None    # task2: 시각 전용 Verlet 전선 (verlet_wire.py)
+    t2_arm = None      # task2 test: 작업자 팔 침입 (worker_arm.py)
     # 리셋해도 0 으로 돌아가지 않는 누적 스텝. 폭주가 "연속" 인지 판정하려면
     # 리셋을 건너 이어지는 시계가 필요하다.
     total_step = 0
@@ -676,6 +682,10 @@ def _run(args, simulation_app, world_cfg) -> None:
                 # 튕겨 나간다 (실측: 테이블 밖 낙하). 복원 후 속도도 0 으로.
                 t2_rope.set_world_poses(t2_rope_def[0].clone(), t2_rope_def[1].clone())
                 t2_rope.set_velocities(torch.zeros((t2_rope.count, 6), device=t2_rope_def[0].device))
+            if t2_wires:
+                t2_wires.request_reset()
+            if t2_arm:
+                t2_arm.reset()
             ros.event("reset_done", step=step, level=reset, source="request")
             step = 0
             recycled = 0
@@ -799,6 +809,34 @@ def _run(args, simulation_app, world_cfg) -> None:
         #    부착되면 12스텝 뒤 커넥터를 초기 자세로 되돌린다. 단자 좌표는
         #    SAM3D 정점 측정값(배터리 로컬) — red→B(+), black→A(-).
         if belt.mode == "none" and "battery" in belt.items and "connector_red" in belt.items:
+            # test 전용: 작업자 팔 침입 — 운반 중(커넥터 들림·미부착)에만
+            # 진입한다. 양쪽 부착 완료면 즉시 후퇴 (완료 초기화 방해 금지).
+            if "worker_arm" in belt.items:
+                if t2_arm is None:
+                    t2_arm = ArmIntruder(env.scene["worker_arm"])
+                    print("[env] task2 작업자 팔 — 침입 상태기계 활성", flush=True)
+                _carrying = False
+                for _an in ("connector_red", "connector_black"):
+                    if _an not in t2_attached:
+                        if float(env.scene[_an].data.root_pos_w[0, 2]) > 0.12:
+                            _carrying = True
+                t2_arm.step(_carrying, len(t2_attached) == 2, ros, step)
+            # 시각 전용 Verlet 전선 — 커넥터 글랜드에 핀 고정되어 따라온다
+            if t2_wires is None:
+                try:
+                    import omni.usd
+                    t2_wires = Task2Wires(omni.usd.get_context().get_stage())
+                    print(f"[env] task2 전선 — Verlet 로프 "
+                          f"{'활성' if t2_wires.ok else '프림 없음'}", flush=True)
+                except Exception as _e:
+                    t2_wires = False
+                    print(f"[env] task2 전선 초기화 실패: {_e}", flush=True)
+            if t2_wires:
+                for _wname in ("connector_red", "connector_black"):
+                    _wobj = env.scene[_wname]
+                    t2_wires.step(_wname,
+                                  _wobj.data.root_pos_w[0].tolist(),
+                                  _wobj.data.root_quat_w[0].tolist())
             if t2_rope:
                 # 전선이 상판 아래로 파고들지 않게 z 하한을 강제한다
                 _rp, _rq = t2_rope.get_world_poses()
@@ -812,6 +850,15 @@ def _run(args, simulation_app, world_cfg) -> None:
             # (-0.09,+0.053) 지점은 작은 캡(디코이)이라 제외했다.
             # 접촉 증거로 재교정 — 서보 하강 시 소켓 바닥이 실제로 얹힌 지점.
             # 부착 목표 = 단자 연장 포스트 상단 (배터리 로컬 z 0.208)
+            # 검은 플러그는 빨간 플러그가 단자에 꽂힐 때까지 제자리 고정
+            # (실무 규칙: + 먼저 — 작업 중 밀리거나 넘어지는 것도 막는다).
+            # 자성 홀드와 같은 매 스텝 재기록이라 리셋과 간섭 없다.
+            if "connector_red" not in t2_attached:
+                _blk = env.scene["connector_black"]
+                _broot = _blk.data.default_root_state.clone()
+                _broot[:, :3] += env.scene.env_origins
+                _blk.write_root_pose_to_sim(_broot[:, :7])
+                _blk.write_root_velocity_to_sim(torch.zeros_like(_broot[:, 7:]))
             _TERMS = {"connector_red": (0.0962, -0.0546, 0.208),
                       "connector_black": (-0.0962, -0.0523, 0.208)}
             _SLEEVE = 0.015
@@ -868,6 +915,8 @@ def _run(args, simulation_app, world_cfg) -> None:
                     # 커넥터를 끌어 넘어뜨린다 (실측)
                     t2_rope.set_world_poses(t2_rope_def[0].clone(), t2_rope_def[1].clone())
                     t2_rope.set_velocities(torch.zeros((t2_rope.count, 6), device=t2_rope_def[0].device))
+                if t2_wires:
+                    t2_wires.request_reset()
                 print("[env] 충전 연결 완료 — 커넥터·로프 초기화", flush=True)
                 ros.event("charging_done", step=step)
 
@@ -885,6 +934,7 @@ def _run(args, simulation_app, world_cfg) -> None:
         ros_images: dict[str, bytes] = {}
         for view_name, sensor, width in (
             ("front", "teleop_front_camera", 480),
+            ("top", "teleop_top_camera", 480),
             ("wrist", "wrist_cam", 480),
         ):
             if not aux_turn:

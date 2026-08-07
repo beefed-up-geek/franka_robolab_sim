@@ -93,3 +93,37 @@ class TeleopViewCameraCfg:
             convention="opengl",
         ),
     )
+
+
+@configclass
+class TeleopTopCameraCfg:
+    """작업면 바로 위에서 수직으로 내려다보는 **고정** Top View — 모든 task 공용.
+
+    eye=(0.30, 0, 2.10), 시선 -z 수직. 카메라 up=+x (로봇이 화면 아래,
+    작업면 안쪽이 화면 위) · right=-y — 텔레옵 기본 시점과 좌우가 같다
+    (배터리·담는 통이 화면 오른쪽). 2.1m 높이 + 화각 52° 로 가로(±y) 2.05m,
+    세로(x) -0.28~0.88 이 잡힌다: task1 작업자 라인·task2 절단판·task3 벨트가
+    모두 화면 안이다.
+
+    쿼터니언은 수직 시선이라 손으로 검산 가능한 단순 회전이다: 카메라 축
+    X=(0,-1,0), Y=(1,0,0), Z=(0,0,1) = 세계 Z 를 축으로 -90° 회전.
+    """
+
+    teleop_top_camera = TiledCameraCfg(
+        prim_path="{ENV_REGEX_NS}/teleop_top_camera",
+        # 보조 화면 — front 와 같은 절반 해상도. 인코딩 비용이 곧 제어율이다.
+        height=270,
+        width=480,
+        data_types=["rgb"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=5.5,
+            focus_distance=28.0,
+            horizontal_aperture=5.376,
+            vertical_aperture=3.024,
+        ),
+        offset=TiledCameraCfg.OffsetCfg(
+            pos=(0.30, 0.0, 2.10),
+            rot=(0.7071068, 0.0, 0.0, -0.7071068),
+            convention="opengl",
+        ),
+    )
