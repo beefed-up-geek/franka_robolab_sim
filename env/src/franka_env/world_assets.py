@@ -158,3 +158,23 @@ class Task1HandoverWorldCfg:
     # 손바닥 받침은 두지 않는다. 핸드오버 판정은 받침 안착이 아니라 "공구가
     # 노란 테이프(y=-0.40)를 넘어 작업자 구역에 들어오면 성공 후 초기화" 로
     # 간다 — 차렷 자세가 기본이라 받침만 공중에 떠 보이는 문제도 없어진다.
+
+
+@configclass
+class Task2ChargingWorldCfg:
+    """창고 + 필라이트만 — 작업자 없음 (task2 플러그 연결)."""
+
+    warehouse = AssetBaseCfg(
+        prim_path="/World/background",
+        spawn=sim_utils.UsdFileCfg(usd_path=WAREHOUSE_USD),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=WAREHOUSE_OFFSET),
+    )
+
+    fill_light = AssetBaseCfg(
+        prim_path="/World/fill_light",
+        spawn=sim_utils.DomeLightCfg(
+            intensity=180.0,
+            color=(0.85, 0.87, 0.92),
+            visible_in_primary_ray=False,
+        ),
+    )

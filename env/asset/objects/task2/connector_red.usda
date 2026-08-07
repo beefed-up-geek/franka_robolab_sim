@@ -1,0 +1,147 @@
+#usda 1.0
+(
+    defaultPrim = "connector_red"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "connector_red" (
+    kind = "component"
+    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+)
+{
+    # 배터리 단자에 씌우는 캡형 커넥터 — 원점은 소켓 입구(바닥면) 중심.
+    # 소켓은 8분할 벽으로 속이 비어 흰색 단자 기둥(r9.5mm)이 내경 r10.5mm(110%)로 들어가고
+    # 슬림 외경(r16mm)이라 단자 리세스 선반 옆 뚜껑 벽에 걸리지 않는다. 파지부는 "평평한 사각 패들"
+    # (3.6 x 2.0 x 3cm, 넓은 면 = X축 방향) — 패드가 면 전체로 물어 마찰이 크다.
+    float physics:mass = 0.05
+    point3f physics:centerOfMass = (0, 0, 0.012)
+
+    def Cube "wall_0" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.75, 0.12, 0.1)]
+        double3 xformOp:translate = (0.01800, 0.00000, 0.0175)
+        float xformOp:rotateZ = 0.0
+        float3 xformOp:scale = (0.004, 0.015, 0.035)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ", "xformOp:scale"]
+    }
+    def Cube "wall_1" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.75, 0.12, 0.1)]
+        double3 xformOp:translate = (0.01273, 0.01273, 0.0175)
+        float xformOp:rotateZ = 45.0
+        float3 xformOp:scale = (0.004, 0.015, 0.035)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ", "xformOp:scale"]
+    }
+    def Cube "wall_2" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.75, 0.12, 0.1)]
+        double3 xformOp:translate = (0.00000, 0.01800, 0.0175)
+        float xformOp:rotateZ = 90.0
+        float3 xformOp:scale = (0.004, 0.015, 0.035)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ", "xformOp:scale"]
+    }
+    def Cube "wall_3" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.75, 0.12, 0.1)]
+        double3 xformOp:translate = (-0.01273, 0.01273, 0.0175)
+        float xformOp:rotateZ = 135.0
+        float3 xformOp:scale = (0.004, 0.015, 0.035)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ", "xformOp:scale"]
+    }
+    def Cube "wall_4" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.75, 0.12, 0.1)]
+        double3 xformOp:translate = (-0.01800, 0.00000, 0.0175)
+        float xformOp:rotateZ = 180.0
+        float3 xformOp:scale = (0.004, 0.015, 0.035)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ", "xformOp:scale"]
+    }
+    def Cube "wall_5" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.75, 0.12, 0.1)]
+        double3 xformOp:translate = (-0.01273, -0.01273, 0.0175)
+        float xformOp:rotateZ = 225.0
+        float3 xformOp:scale = (0.004, 0.015, 0.035)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ", "xformOp:scale"]
+    }
+    def Cube "wall_6" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.75, 0.12, 0.1)]
+        double3 xformOp:translate = (-0.00000, -0.01800, 0.0175)
+        float xformOp:rotateZ = 270.0
+        float3 xformOp:scale = (0.004, 0.015, 0.035)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ", "xformOp:scale"]
+    }
+    def Cube "wall_7" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.75, 0.12, 0.1)]
+        double3 xformOp:translate = (0.01273, -0.01273, 0.0175)
+        float xformOp:rotateZ = 315.0
+        float3 xformOp:scale = (0.004, 0.015, 0.035)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ", "xformOp:scale"]
+    }
+    def Cylinder "cap" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        uniform token axis = "Z"
+        double radius = 0.02
+        double height = 0.006
+        color3f[] primvars:displayColor = [(0.05, 0.05, 0.06)]
+        double3 xformOp:translate = (0, 0, 0.038)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+    def Cylinder "neck"
+    {
+        uniform token axis = "Z"
+        double radius = 0.008
+        double height = 0.03
+        color3f[] primvars:displayColor = [(0.75, 0.12, 0.1)]
+        double3 xformOp:translate = (0, 0, 0.056)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+    def Cube "grip_paddle" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.08, 0.08, 0.09)]
+        double3 xformOp:translate = (0, 0, 0.087)
+        float3 xformOp:scale = (0.036, 0.02, 0.03)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+    }
+    def Cylinder "cable_gland"
+    {
+        uniform token axis = "X"
+        double radius = 0.006
+        double height = 0.02
+        color3f[] primvars:displayColor = [(0.05, 0.05, 0.06)]
+        double3 xformOp:translate = (0.024, 0, 0.06)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+}

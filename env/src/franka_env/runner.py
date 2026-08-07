@@ -647,6 +647,11 @@ def _run(args, simulation_app, world_cfg) -> None:
     action = torch.zeros(1, 7, device=env.device)
     step = 0
     recycled = 0
+    t2_attached = {}   # task2: 부착된 커넥터 -> 부착 스텝
+    t2_weld = {}       # task2: 파지 용접된 커넥터 -> EEF 상대 오프셋
+    t2_rope = None     # task2: 로프 링크 뷰 (기본 자세 복원용)
+    t2_terms_pub = {}  # task2: ROS status 로 내보낼 단자 월드 좌표
+    t2_rope_def = None
     # 리셋해도 0 으로 돌아가지 않는 누적 스텝. 폭주가 "연속" 인지 판정하려면
     # 리셋을 건너 이어지는 시계가 필요하다.
     total_step = 0
@@ -662,7 +667,15 @@ def _run(args, simulation_app, world_cfg) -> None:
         delta, gripper, reset = state.consume()
 
         if reset:
+            t2_attached.clear()   # task2: 부착·용접 상태는 리셋과 함께 비운다
+            t2_weld.clear()
             obs = reset_episode(env, state, belt, f"요청 (step {step})", level=reset)
+            if t2_rope:
+                # 로프는 reset_episode **뒤에** 되돌린다 — 리셋 도중(팔·물체가
+                # 움직이는 사이) 로프를 텔레포트하면 제약 스냅으로 커넥터가
+                # 튕겨 나간다 (실측: 테이블 밖 낙하). 복원 후 속도도 0 으로.
+                t2_rope.set_world_poses(t2_rope_def[0].clone(), t2_rope_def[1].clone())
+                t2_rope.set_velocities(torch.zeros((t2_rope.count, 6), device=t2_rope_def[0].device))
             ros.event("reset_done", step=step, level=reset, source="request")
             step = 0
             recycled = 0
@@ -766,7 +779,7 @@ def _run(args, simulation_app, world_cfg) -> None:
         # task1(벨트 없음): 공구가 경계 테이프(y=-0.40)를 넘으면 **그 공구만**
         # 씬 기본 자세로 되돌린다 — 전달 판정이자 다음 시연 준비다. 정책은
         # 내려놓을 필요 없이 수평으로 들고 선을 넘기만 하면 된다.
-        if belt.mode == "none":
+        if belt.mode == "none" and "battery" not in belt.items:
             _crossed = []
             _origin = env.scene.env_origins[0]
             for _name in belt.items:
@@ -781,6 +794,82 @@ def _run(args, simulation_app, world_cfg) -> None:
             if _crossed:
                 print(f"[env] 경계 통과 — 초기화: {_crossed}", flush=True)
                 ros.event("tool_crossed", step=step, tools=_crossed)
+
+        # ── task2: 커넥터를 배터리 단자에 씌우면 부착(스냅·유지)하고, 둘 다
+        #    부착되면 12스텝 뒤 커넥터를 초기 자세로 되돌린다. 단자 좌표는
+        #    SAM3D 정점 측정값(배터리 로컬) — red→B(+), black→A(-).
+        if belt.mode == "none" and "battery" in belt.items and "connector_red" in belt.items:
+            if t2_rope:
+                # 전선이 상판 아래로 파고들지 않게 z 하한을 강제한다
+                _rp, _rq = t2_rope.get_world_poses()
+                if bool((_rp[:, 2] < 0.004).any()):
+                    _rp[:, 2] = torch.clamp(_rp[:, 2], min=0.004)
+                    t2_rope.set_world_poses(_rp, _rq)
+            _bat = env.scene["battery"]
+            _bp = _bat.data.root_pos_w[0]
+            _bq = _bat.data.root_quat_w[0]
+            # 상면 수직 렌더 판독으로 교정 — 두 포스트 모두 y=-0.05 모서리.
+            # (-0.09,+0.053) 지점은 작은 캡(디코이)이라 제외했다.
+            # 접촉 증거로 재교정 — 서보 하강 시 소켓 바닥이 실제로 얹힌 지점.
+            # 부착 목표 = 단자 연장 포스트 상단 (배터리 로컬 z 0.208)
+            _TERMS = {"connector_red": (0.0962, -0.0546, 0.208),
+                      "connector_black": (-0.0962, -0.0523, 0.208)}
+            _SLEEVE = 0.015
+            # 소켓이 속 빈 캡이라 포스트가 실제로 들어간다 — 바닥이 포스트
+            # 상단 아래 6mm 이상 내려간(=씌워진) 순간에만 부착으로 본다.
+            _R_XY = 0.016
+            _INSERT = -0.006
+            _w, _x, _y, _z = (float(_bq[0]), float(_bq[1]), float(_bq[2]), float(_bq[3]))
+            for _name, _off in _TERMS.items():
+                _obj = env.scene[_name]
+                _ox, _oy, _oz = _off
+                _tx = (1 - 2*(_y*_y + _z*_z))*_ox + 2*(_x*_y - _w*_z)*_oy + 2*(_x*_z + _w*_y)*_oz
+                _ty = 2*(_x*_y + _w*_z)*_ox + (1 - 2*(_x*_x + _z*_z))*_oy + 2*(_y*_z - _w*_x)*_oz
+                _tz = 2*(_x*_z - _w*_y)*_ox + 2*(_y*_z + _w*_x)*_oy + (1 - 2*(_x*_x + _y*_y))*_oz
+                _term = (float(_bp[0]) + _tx, float(_bp[1]) + _ty, float(_bp[2]) + _tz)
+                t2_terms_pub["pos" if _name == "connector_red" else "neg"] = [
+                    round(_term[0], 4), round(_term[1], 4), round(_term[2], 4)]
+                if _name in t2_attached:
+                    # 자성 홀드 (사용자 요청 복원) — 부착된 커넥터를 단자 위에
+                    # 스냅해 고정한다. 완료 초기화 때 함께 풀린다.
+                    _ox2, _oy2, _oz2 = _off
+                    _tx2 = (1 - 2*(_y*_y + _z*_z))*_ox2 + 2*(_x*_y - _w*_z)*_oy2 + 2*(_x*_z + _w*_y)*_oz2
+                    _ty2 = 2*(_x*_y + _w*_z)*_ox2 + (1 - 2*(_x*_x + _z*_z))*_oy2 + 2*(_y*_z - _w*_x)*_oz2
+                    _tz2 = 2*(_x*_z - _w*_y)*_ox2 + 2*(_y*_z + _w*_x)*_oy2 + (1 - 2*(_x*_x + _y*_y))*_oz2
+                    _root = _obj.data.default_root_state.clone()
+                    _root[:, 0] = float(_bp[0]) + _tx2
+                    _root[:, 1] = float(_bp[1]) + _ty2
+                    _root[:, 2] = float(_bp[2]) + _tz2 - _SLEEVE
+                    _root[:, 3] = 1.0
+                    _root[:, 4:7] = 0.0
+                    _obj.write_root_pose_to_sim(_root[:, :7])
+                    _obj.write_root_velocity_to_sim(torch.zeros_like(_root[:, 7:]))
+                    continue
+                _cp = _obj.data.root_pos_w[0]
+                _dx = float(_cp[0]) - _term[0]
+                _dy = float(_cp[1]) - _term[1]
+                _dz = float(_cp[2]) - _term[2]
+                if _dx*_dx + _dy*_dy < _R_XY*_R_XY and -0.022 < _dz < _INSERT:
+                    t2_attached[_name] = step
+                    _pol = "B(+)" if _name == "connector_red" else "A(-)"
+                    print(f"[env] 부착 — {_name} → {_pol} 단자", flush=True)
+                    ros.event("connector_attached", step=step, connector=_name)
+            if len(t2_attached) == 2 and step - max(t2_attached.values()) > 12:
+                for _name in ("connector_red", "connector_black"):
+                    _obj = env.scene[_name]
+                    _root = _obj.data.default_root_state.clone()
+                    _root[:, :3] += env.scene.env_origins
+                    _obj.write_root_pose_to_sim(_root[:, :7])
+                    _obj.write_root_velocity_to_sim(torch.zeros_like(_root[:, 7:]))
+                    _obj.reset()
+                t2_attached.clear()
+                if t2_rope:
+                    # 로프도 함께 복원 — 안 하면 남은 장력이 방금 초기화된
+                    # 커넥터를 끌어 넘어뜨린다 (실측)
+                    t2_rope.set_world_poses(t2_rope_def[0].clone(), t2_rope_def[1].clone())
+                    t2_rope.set_velocities(torch.zeros((t2_rope.count, 6), device=t2_rope_def[0].device))
+                print("[env] 충전 연결 완료 — 커넥터·로프 초기화", flush=True)
+                ros.event("charging_done", step=step)
 
         # 제어 주파수 측정 (1초 창)
         hz_step += 1
@@ -868,6 +957,7 @@ def _run(args, simulation_app, world_cfg) -> None:
                     # 유효 속도(흔들림 반영)를 준다. 기준 속도를 주면 정책의 벨트
                     # 추종 피드포워드가 빨라진 구간에서 뒤처져 파지점이 밀린다.
                     belt_mpm=belt.current_mpm(),
+                    terminals=(t2_terms_pub or None),
                 ),
             )
             ros.spin()
