@@ -130,7 +130,7 @@ def Xform "connector_black" (
     )
     {
         double size = 1
-        color3f[] primvars:displayColor = [(0.08, 0.08, 0.09)]
+        color3f[] primvars:displayColor = [(0.95, 0.8, 0.05)]
         double3 xformOp:translate = (0, 0, 0.087)
         float3 xformOp:scale = (0.036, 0.02, 0.03)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]

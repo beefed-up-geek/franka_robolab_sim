@@ -241,5 +241,5 @@ class LeRobotWriter:
             "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
 
 
-STATE_NAMES = ["eef_x", "eef_y", "eef_z", "eef_qw", "eef_qx", "eef_qy", "eef_qz", "gripper"]
-ACTION_NAMES = ["dx", "dy", "dz", "droll", "dpitch", "dyaw", "gripper"]
+STATE_NAMES = ["eef_x", "eef_y", "eef_z", "gripper"]
+ACTION_NAMES = ["dx", "dy", "dz", "gripper"]

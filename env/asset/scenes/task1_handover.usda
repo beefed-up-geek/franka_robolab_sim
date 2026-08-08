@@ -28,6 +28,21 @@ over "world"
 {
     def Scope "Task1Looks"
     {
+        def Material "MatGripBand"
+        {
+            token outputs:mdl:displacement.connect = </world/Task1Looks/MatGripBand/Shader.outputs:out>
+            token outputs:mdl:surface.connect = </world/Task1Looks/MatGripBand/Shader.outputs:out>
+            token outputs:mdl:volume.connect = </world/Task1Looks/MatGripBand/Shader.outputs:out>
+            def Shader "Shader"
+            {
+                uniform token info:implementationSource = "sourceAsset"
+                uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
+                uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+                color3f inputs:diffuse_color_constant = (0.98, 0.82, 0.0)
+                float inputs:reflection_roughness_constant = 0.45
+                token outputs:out (renderType = "material")
+            }
+        }
         def Material "MatWhite"
         {
             token outputs:mdl:displacement.connect = </world/Task1Looks/MatWhite/Shader.outputs:out>
@@ -156,6 +171,23 @@ over "world"
         float3 xformOp:scale = (1, 1, 1)
         double3 xformOp:translate = (0.5301, 0.1, 0.019)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        # 파지 지점 표시 — 정책이 잡을 곳을 눈으로 찾도록 (시각 전용, 충돌 없음).
+        # 위치·반지름은 메시 실측: 손잡이 축은 로컬 +X, 반지름 21.6mm.
+        def Cylinder "grip_band" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            rel material:binding = </world/Task1Looks/MatGripBand> (
+                bindMaterialAs = "strongerThanDescendants"
+            )
+            uniform token axis = "X"
+            double radius = 0.03
+            double height = 0.025
+            color3f[] primvars:displayColor = [(0.95, 0.8, 0.05)]
+            double3 xformOp:translate = (0, 0, -0.008)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
     }
     def "cordless_drill" (
         prepend payload = @../objects/tools/cordless_drill/cordless_drill.usd@
@@ -181,5 +213,22 @@ over "world"
             float3 xformOp:scale = (0.04, 0.03, 0.02)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
         }
+        # 파지 지점 표시 (시각 전용). 손잡이 축은 로컬 -Y(기울기 10° 내), 반지름 23.1mm.
+        # 위치는 파지점 = 무게중심으로 잡아 둔 지점과 같다.
+        def Cylinder "grip_band" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            rel material:binding = </world/Task1Looks/MatGripBand> (
+                bindMaterialAs = "strongerThanDescendants"
+            )
+            uniform token axis = "Y"
+            double radius = 0.0265
+            double height = 0.025
+            color3f[] primvars:displayColor = [(0.95, 0.8, 0.05)]
+            double3 xformOp:translate = (0.0402, -0.0225, -0.007)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
     }
 }

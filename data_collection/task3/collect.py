@@ -42,7 +42,7 @@ from policy import PickPlacePolicy                      # noqa: E402
 # 자연어 명령 — 태스크 전체가 한 문장을 쓴다 (LeRobot 의 task 필드,
 # meta/tasks.jsonl 에 실린다).
 TASK_TEXT = "Pick up the cans from the conveyor and put them in the bin"
-CAMERAS = ("front", "wrist")
+CAMERAS = ("front", "top", "wrist")
 EPISODE_TIMEOUT_S = 150.0
 
 # 다른 에피소드보다 이 배율 넘게 길면 "너무 오래 걸린" 것으로 보고 버린다.
@@ -209,7 +209,7 @@ def main() -> int:
 
     print("[collect] 시뮬레이션 대기 중…", flush=True)
     t0 = time.time()
-    while not node.ready() and time.time() - t0 < 30:
+    while not node.ready() and time.time() - t0 < 90:
         time.sleep(0.1)
     if not node.ready():
         print("[collect] 토픽이 오지 않습니다. 시뮬레이션이 떠 있는지 확인하세요.", flush=True)
@@ -230,7 +230,7 @@ def main() -> int:
                   flush=True)
 
     writer = LeRobotWriter(args.out, fps=args.rate, cameras=list(CAMERAS),
-                           state_dim=8, action_dim=7, task=TASK_TEXT)
+                           state_dim=4, action_dim=4, task=TASK_TEXT)
     policy = PickPlacePolicy(seed=args.seed)
     period = 1.0 / args.rate
     saved, attempts, choices = 0, 0, {0: 0, 1: 0}
@@ -283,8 +283,9 @@ def main() -> int:
 
             if info.get("stage") != "SEARCH":
                 writer.add(
-                    state=node.eef + node.eef_quat + [node.gripper],
-                    action=list(delta) + [1.0 if close else 0.0],
+                    state=node.eef + [node.gripper],
+                    action=[float(delta[0]), float(delta[1]), float(delta[2]),
+                            1.0 if close else 0.0],
                     images=dict(node.images),
                     extra={"stage": info.get("stage", ""),
                            "target": info.get("target") or ""},
