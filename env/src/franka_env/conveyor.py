@@ -138,6 +138,19 @@ FALLEN_Z = -0.10
 RECOVER_DX = 0.13
 RECOVER_DZ = 0.08
 
+# ── 배치(정적) 모드 ──────────────────────────────────────────────────────
+# batch > 0 이면 벨트를 세우고 캔 N개를 무작위 위치에 **정적으로** 놓는다.
+# 연속 투입(대기열→입구) 대신 라운드 방식이다:
+#   train (파열품 없음)  N개를 모두 치우면 새 N개를 무작위 위치에 재배치
+#   test  (파열품 섞임)  정상 캔을 모두 통에 담으면 라운드 종료 표시만 하고,
+#                        전체 초기화는 runner 가 요청한다 (trio_done 이벤트)
+# 움직이는 벨트에서는 올바른 요격점이 한 프레임 관측으로 정해지지 않아
+# (가변 속도 → 같은 장면에 여러 정답) 회귀가 평균으로 무너졌다 — v5~v7 의
+# 폐루프 실패의 근본 원인. 정적 배치는 그 다봉성을 제거한다.
+BATCH_Y_RANGE = (-0.26, 0.30)   # 캔을 놓는 y 범위 — 정책 도달 범위 안쪽
+BATCH_MIN_GAP = 0.13            # 캔 사이 최소 간격 [m] (지름 71mm + 여유)
+BATCH_X_JITTER = 0.02           # 벨트 중심에서 x 흔들림 [m] (반폭 0.08 안)
+
 # force 모드 — 벨트 마찰을 힘으로 흉내 낸다.
 # 목표 속도와의 차이에 비례해 힘을 주되, 실제 마찰이 낼 수 있는 최대 가속도로
 # 자른다. 이 상한이 곧 "벨트가 물체를 얼마나 세게 끌 수 있는가" 이고, 넘으면
@@ -162,6 +175,7 @@ class Conveyor:
         defect_ratio: float = 0.2,
         spacing: float = INLET_CLEARANCE,
         jitter: float = 0.0,
+        batch: int = 0,
     ) -> None:
         """
         Args:
@@ -173,6 +187,8 @@ class Conveyor:
             jitter: 벨트 속도를 기준의 ±이 비율 안에서 천천히 흔든다 (0=끔).
                 실물 컨베이어도 부하에 따라 속도가 일렁이고, 정확히 일정한
                 속도만 본 정책은 그 변주에 약하다.
+            batch: 0 보다 크면 배치(정적) 모드 — 벨트를 세우고 캔 이 개수를
+                무작위 위치에 놓는다 (모듈 상단 "배치 모드" 설명 참고).
         """
         import random as _random
 
@@ -191,7 +207,17 @@ class Conveyor:
         self._binned = 0
         self._off_belt = 0
         self._held = False
+        self._spacing_now = spacing  # 이번 투입에 쓰는 간격 — 투입마다 다시 뽑는다
         self._released = {True: 0, False: 0}   # 불량품 / 정상품 투입 수
+        # 배치(정적) 모드 상태 — batch == 0 이면 전부 무시된다.
+        self.batch = max(0, int(batch))
+        self._batch_active: list[str] = []   # 이번 라운드에서 아직 벨트에 남은 캔
+        self._batch_binned: set[str] = set()
+        self._batch_round = 0
+        self._batch_done = False             # test: 정상 캔 전부 처리됨
+        self._need_spawn = self.batch > 0
+        self._binned_ok = 0                  # 통에 담은 정상 캔 수
+        self._binned_bad = 0                 # 통에 담은 파열 캔 수 (test 의 실수)
 
         # env.scene 에는 블록 강체뿐 아니라 접촉 센서도 들어 있고, 센서 이름이
         # "block_0__block_1" 처럼 같은 접두사로 시작한다. 이름만 보고 고르면
@@ -418,7 +444,12 @@ class Conveyor:
 
         비우지 않으면 리셋으로 화물이 제자리에 돌아가도 다음 스텝에서 다시
         대기 자리로 끌려 내려간다. 결국 벨트가 텅 비고 전부 상판 아래에 갇힌다.
+
+        배치 모드는 반대로 **건드리지 않는다** — soft/hard 리셋은 팔만 되돌리는
+        것이고, 대기열을 비우면 숨겨 둔 캔들이 매 스텝 재고정을 잃고 떨어진다.
         """
+        if self.batch:
+            return
         self._queue.clear()
 
     def reinit(self) -> None:
@@ -438,16 +469,34 @@ class Conveyor:
         self._off_belt = 0
         self._held = False
         self._released = {True: 0, False: 0}
+        if self.batch:
+            # 다음 스텝의 recycle 이 새 라운드를 깐다. 여기서 바로 놓지 않는
+            # 이유는 full 리셋이 이 뒤에 restore_rigid_objects 를 **한 번 더**
+            # 불러 씬 기본 자세로 덮어쓰기 때문이다 (runner.reset_episode 참고).
+            self._batch_active = []
+            self._batch_binned = set()
+            self._batch_round = 0
+            self._batch_done = False
+            self._binned_ok = 0
+            self._binned_bad = 0
+            self._need_spawn = True
 
     def update_hold(self, ee_pos) -> bool:
-        """그리퍼가 컨베이어 위 영역에 있으면 벨트를 멈춘다. 매 스텝 호출한다.
+        """그리퍼가 컨베이어 위에서 **낮게 내려온** 동안만 벨트를 멈춘다.
 
-        영역을 벗어나는 순간 — 캔을 물고 통 쪽으로 나가기 시작하면 — 다시 돈다.
+        높이 조건(z<0.47)을 다시 넣었다 — 정지가 필요한 것은 파지 정밀 구간
+        (APPROACH 하강~파지)뿐이고, 빈손으로 높이 지나가는 TRANSIT 중에도
+        멈추면 사이클당 벨트 가동 시간이 줄어 투입이 소비를 못 따라간다
+        (벨트에 캔이 안 쌓여 두 번째 픽이 굶는다). 예전에 z<0.44 를 뺐던 것은
+        캔을 든 뒤(z 0.431)에도 정지가 남는 문제였는데, 0.47 은 그 높이 위라
+        해당하지 않고, 운반은 어차피 곧 xy 영역을 벗어난다.
         """
         if self.mode == "none":
             return False
         x, y = float(ee_pos[0]), float(ee_pos[1])
-        self._held = abs(x - BELT_X) < HOLD_DX and HOLD_Y[0] < y < HOLD_Y[1]
+        z = float(ee_pos[2])
+        self._held = (abs(x - BELT_X) < HOLD_DX and HOLD_Y[0] < y < HOLD_Y[1]
+                      and z < 0.47)
         return self._held
 
     @property
@@ -519,7 +568,7 @@ class Conveyor:
         힘은 env.step() 안의 write_data_to_sim() 에서 적용되므로 스텝 직전에
         불러야 한다.
         """
-        if self.mode != "force" or not self._items:
+        if self.mode != "force" or not self._items or self.batch:
             return 0
 
         origin = self.env.scene.env_origins[0]
@@ -608,6 +657,8 @@ class Conveyor:
         """
         if self.mode != "script":
             return 0
+        if self.batch:
+            return 0        # 배치 모드 — 벨트는 항상 정지, 캔은 보통 강체로 남는다
         if not self.enabled or not self._items:
             return 0
         # 속도가 0 이면 쓸 것이 없다. 그런데도 위치를 다시 쓰면 **정지한 벨트가
@@ -680,7 +731,7 @@ class Conveyor:
             if self._on_belt(name, x, y, z):
                 on_belt += 1
             others[name] = [round(y, 3), round(z, 3)]
-        return {
+        out = {
             "on_belt": on_belt,
             "queued": len(self._queue),
             "others": others,
@@ -690,6 +741,12 @@ class Conveyor:
             "defect_ratio": round(self.defect_ratio, 2),
             "released": [self._released[False], self._released[True]],  # 정상, 불량
         }
+        if self.batch:
+            out["round"] = self._batch_round
+            out["active"] = list(self._batch_active)
+            out["binned_ok"] = self._binned_ok
+            out["binned_bad"] = self._binned_bad
+        return out
 
     def recycle(self) -> int:
         """출구를 지났거나 떨어진 화물을 회수해 대기열에 넣고, 입구가 비면 투입한다.
@@ -703,6 +760,8 @@ class Conveyor:
             # none: 벨트가 없는 태스크(task1 등). 회수를 돌리면 상판 위 물체가
             # "벨트 아래로 떨어졌다" 로 오인되어 전부 대기열로 빨려 들어간다.
             return 0
+        if self.batch:
+            return self._recycle_batch()
 
         positions = self._positions()
 
@@ -753,7 +812,137 @@ class Conveyor:
             if name is not None:
                 self._teleport(name)
                 self._released[name in self._defects] += 1
+                # 다음 투입 간격을 새로 뽑는다 — 캔 사이 거리가 매번 달라져
+                # 벨트 위 배치(와 집는 위치)가 사이클마다 흩어진다.
+                # 범위 [1.05, 1.25]×0.14 = 0.147~0.175m: 캔(지름 71mm) 사이가
+                # 눈에 띄게 벌어지고(7.6cm 이상 — 0.112 였을 때는 4cm 라 화면에서
+                # 딱 붙어 보였다), 아래 두 조건도 함께 성립한다:
+                #  ① 사이클당 투입 ≥ 1 — update_hold 의 높이 조건으로 벨트 가동이
+                #     사이클당 ~9초라, 최고 속도(1.1m/분)×9s ≈ 0.165 ≥ 간격.
+                #  ② 낙하 없음 — 강제선두 최악 체인
+                #     0.144 + 2×0.165 − 0.147 + 도달전진 ≈ 0.35 < 출구 0.36.
+                self._spacing_now = self.spacing * self._jr.uniform(1.05, 1.25)
                 return 1
+        return 0
+
+    # ── 배치(정적) 모드 ──────────────────────────────────────────────────
+    @property
+    def batch_done(self) -> bool:
+        """test 라운드 종료 — 정상 캔이 모두 벨트에서 사라졌다."""
+        return self.batch > 0 and self._batch_done
+
+    @property
+    def batch_round(self) -> int:
+        return self._batch_round
+
+    def _spawn_batch(self) -> None:
+        """캔 batch 개를 벨트 위 무작위 위치에 놓고 나머지는 전부 숨긴다.
+
+        파열품이 있는 씬(test)이면 1~2개를 파열품으로 섞는다 — 항상 정상과
+        파열이 공존해야 "정상만 골라 담기" 가 성립한다. 없는 씬(train)은
+        정상 캔 종류 중에서 batch 개를 뽑는다.
+        """
+        normals = [n for n in self._blocks if n not in self._defects]
+        defects = [n for n in self._blocks if n in self._defects]
+        k = min(self.batch, len(self._blocks))
+        if defects and k >= 2:
+            nd = min(self._jr.choice((1, 2)), len(defects), k - 1)
+            chosen = self._jr.sample(defects, nd) \
+                + self._jr.sample(normals, min(k - nd, len(normals)))
+        else:
+            chosen = self._jr.sample(normals, min(k, len(normals)))
+        self._jr.shuffle(chosen)     # 어느 종류가 어느 자리에 갈지도 무작위
+
+        # 서로 최소 간격 이상 떨어진 y 를 기각 샘플링으로 뽑는다. 범위 0.56m 에
+        # 간격 0.13m 짜리 3개라 몇 번 안에 나온다 — 혹시 못 뽑으면 마지막
+        # 시도를 그대로 쓴다 (겹치면 물리가 밀어내고 회수 판정이 수습한다).
+        ys = [0.0] * len(chosen)
+        for _ in range(200):
+            ys = sorted(self._jr.uniform(*BATCH_Y_RANGE) for _ in chosen)
+            if all(b - a >= BATCH_MIN_GAP for a, b in zip(ys, ys[1:])):
+                break
+
+        self._queue = [n for n in self._blocks if n not in chosen]
+        for slot, name in enumerate(self._queue):
+            self._park(name, slot)
+        for name, y in zip(chosen, ys):
+            self._place_static(name, y)
+        self._batch_active = list(chosen)
+        self._batch_binned = set()
+        self._batch_done = False
+        self._batch_round += 1
+        self._need_spawn = False
+        print(f"[batch] 라운드 {self._batch_round} — "
+              + ", ".join(f"{n}@y={y:+.2f}" for n, y in zip(chosen, ys)),
+              flush=True)
+
+    def _place_static(self, name: str, y: float) -> None:
+        """캔을 벨트 위 (x 살짝 흔든) 자리에 무작위 요(yaw)로 놓는다."""
+        import math as _m
+
+        obj = self.env.scene[name]
+        device = self.env.device
+        origin = self.env.scene.env_origins[0]
+        yaw = self._jr.uniform(-_m.pi, _m.pi)   # 라벨 방향까지 무작위
+        pose = torch.zeros((1, 7), device=device)
+        pose[0, 0] = (BELT_X + self._jr.uniform(-BATCH_X_JITTER, BATCH_X_JITTER)
+                      + origin[0])
+        pose[0, 1] = y + origin[1]
+        pose[0, 2] = (BELT_TOP_Z + self._half_height.get(name, BLOCK_HALF)
+                      + 0.002 + origin[2])
+        pose[0, 3] = _m.cos(yaw / 2.0)          # (w, x, y, z) — z축 회전
+        pose[0, 6] = _m.sin(yaw / 2.0)
+        obj.write_root_pose_to_sim(pose)
+        obj.write_root_velocity_to_sim(torch.zeros((1, 6), device=device))
+
+    def _recycle_batch(self) -> int:
+        """배치 모드의 회수·라운드 관리 — recycle() 이 매 스텝 위임한다."""
+        if self._need_spawn:
+            self._spawn_batch()
+            return 1
+
+        for name, pos in self._positions().items():
+            if name in self._queue:
+                continue
+            x, y, z = float(pos[0]), float(pos[1]), float(pos[2])
+            off_belt = (
+                FALLEN_Z < z < BELT_TOP_Z - OFF_BELT_DZ
+                and not self._grasped(name)
+                and not self._over_bin(x, y)
+            )
+            if self._in_bin(x, y, z) or z < FALLEN_Z or off_belt:
+                if self._in_bin(x, y, z):
+                    self._binned += 1
+                    self._batch_binned.add(name)
+                    if name in self._defects:
+                        self._binned_bad += 1
+                    else:
+                        self._binned_ok += 1
+                    why = "통"
+                elif off_belt:
+                    self._off_belt += 1
+                    why = "벨트밖"
+                else:
+                    why = "낙하"
+                print(f"[recycle] {name} {why} pos=({x:.3f},{y:.3f},{z:.3f})",
+                      flush=True)
+                self._park(name, len(self._queue))
+                self._queue.append(name)
+                if name in self._batch_active:
+                    self._batch_active.remove(name)
+
+        for slot, name in enumerate(self._queue):
+            self._park(name, slot)
+
+        # 라운드 종료 판정. 파열품이 있는 씬(test)은 정상 캔이 모두 사라지면
+        # 표시만 하고 멈춘다 — 전체 초기화는 runner 가 trio_done 이벤트와 함께
+        # 요청한다. 없는 씬(train)은 셋 다 사라지는 즉시 다음 라운드를 깐다.
+        if self._defects:
+            if not self._batch_done and not any(
+                    n not in self._defects for n in self._batch_active):
+                self._batch_done = True
+        elif not self._batch_active:
+            self._need_spawn = True
         return 0
 
     def requeue_near(self, ee_pos, radius: float = 0.15) -> list[str]:
@@ -779,6 +968,8 @@ class Conveyor:
             if dx * dx + dy * dy <= radius * radius:
                 self._queue.append(name)
                 self._park(name, len(self._queue) - 1)
+                if name in self._batch_active:      # 배치 라운드 장부도 맞춘다
+                    self._batch_active.remove(name)
                 out.append(name)
         return out
 
@@ -810,12 +1001,17 @@ class Conveyor:
         return self._queue.pop(0)
 
     def _inlet_clear(self, positions: dict) -> bool:
-        """입구 근처가 비어 있는가. 대기 중인 화물은 세지 않는다."""
+        """입구 근처가 비어 있는가. 대기 중인 화물은 세지 않는다.
+
+        간격은 고정값이 아니라 투입마다 새로 뽑은 `_spacing_now` 를 쓴다 —
+        간격이 일정하면 벨트 위 화물 배치가 매 사이클 똑같아져, 정책이 항상
+        같은 위치에서 집는 데이터만 쌓인다 (위치 편향).
+        """
         for name, pos in positions.items():
             if name in self._queue:
                 continue
             if (
-                abs(float(pos[1]) - INLET_Y) < self.spacing
+                abs(float(pos[1]) - INLET_Y) < self._spacing_now
                 and abs(float(pos[0]) - BELT_X) < 0.12
             ):
                 return False

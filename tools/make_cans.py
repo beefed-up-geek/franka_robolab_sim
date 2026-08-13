@@ -178,17 +178,24 @@ def build_shell(*, defect: bool) -> MeshBuilder:
     for j in range(RINGS):
         in_label = j in lab
         uv_rows = ((j - j0) / span, (j - j0 + 1) / span) if in_label else None
-        m.band(grid[j], grid[j + 1], group="label" if in_label else None,
-               uv_rows=uv_rows)
+        # 몸통 맨 윗 밴드도 노란 띠에 넣는다 — 측면에서 보이는 띠 두께를
+        # 두 배로 키우기 위해서다 (라벨 구간은 건드리지 않는다).
+        grp = ("label" if in_label
+               else ("rim_top" if j >= RINGS - 2 else None))
+        m.band(grid[j], grid[j + 1], group=grp, uv_rows=uv_rows)
 
-    # 시밍된 위·아래 테두리
+    # 시밍된 위·아래 테두리. 위 테두리는 노란 띠(rim_top) — 탑뷰에서 캔의
+    # 위치·자세가 한눈에 읽히는 시각 표지다 (task1 공구 그립 밴드와 같은 노랑,
+    # 사용자 요청). 옆면 시밍 밴드와 뚜껑의 바깥 고리(아래 _cap 의 d=0)를 함께
+    # 칠해 위에서도 옆에서도 보인다. 아래 테두리는 강판 그대로.
     top_rim = m.ring(ang, RIM_R, H / 2)
     bot_rim = m.ring(ang, RIM_R, -H / 2)
-    m.band(grid[RINGS], top_rim)
+    m.band(grid[RINGS], top_rim, group="rim_top")
     m.band(bot_rim, grid[0])
 
     _cap(m, ang, bot_rim, sign=-1, bulge=BOT_BULGE if defect else 0.0, tear=False)
-    _cap(m, ang, top_rim, sign=+1, bulge=TOP_BULGE if defect else 0.0, tear=defect)
+    _cap(m, ang, top_rim, sign=+1, bulge=TOP_BULGE if defect else 0.0, tear=defect,
+         rim_group="rim_top")
 
     if defect:
         # 뚫린 구멍의 안쪽 벽. 배경이 비치지 않게 막으면서, 맨 금속색을 줘서
@@ -201,10 +208,13 @@ def build_shell(*, defect: bool) -> MeshBuilder:
     return m
 
 
-def _cap(m: MeshBuilder, ang, rim: list[int], *, sign: int, bulge: float, tear: bool) -> None:
+def _cap(m: MeshBuilder, ang, rim: list[int], *, sign: int, bulge: float, tear: bool,
+         rim_group: str | None = None) -> None:
     """뚜껑 하나. bulge>0 이면 부푼 돔, 0 이면 살짝 오목한 평평한 뚜껑.
 
     sign 은 +1(위) / -1(아래). tear 가 참이면 뜯겨 나간 구간의 면을 만들지 않는다.
+    rim_group 을 주면 뚜껑의 **바깥 고리(d=0)** 면들을 그 그룹으로 묶는다 —
+    탑뷰에서 보이는 테두리 띠다. 찢긴 구간은 면이 없으므로 띠도 함께 끊긴다.
     """
     base_z = sign * H / 2
     if bulge > 0.0:
@@ -226,15 +236,21 @@ def _cap(m: MeshBuilder, ang, rim: list[int], *, sign: int, bulge: float, tear: 
         apex = m.add((0.0, 0.0, base_z - sign * 0.0026))
 
     for d in range(len(rings) - 1):
+        # 바깥 세 고리(d=0~2)를 띠로 묶는다 — 두 고리(≈4mm)로도 탑뷰에서
+        # 가늘어 다시 두 배로 넓혔다 (사용자 요청, 환형 폭 ≈16mm). 뚜껑
+        # 중앙(반경 55% 안쪽)은 강판 그대로라 파열 부풂·찢김 신호는 남는다.
+        grp = rim_group if d <= 2 else None
         for i in range(SEG):
             k = (i + 1) % SEG
             if tear and tear_open(d, i):
                 continue
             # sign 에 따라 감는 방향을 뒤집어야 법선이 바깥을 본다
             if sign > 0:
-                m.face(rings[d][i], rings[d + 1][i], rings[d + 1][k], rings[d][k])
+                m.face(rings[d][i], rings[d + 1][i], rings[d + 1][k], rings[d][k],
+                       group=grp)
             else:
-                m.face(rings[d][i], rings[d][k], rings[d + 1][k], rings[d + 1][i])
+                m.face(rings[d][i], rings[d][k], rings[d + 1][k], rings[d + 1][i],
+                       group=grp)
     last = len(rings) - 1
     for i in range(SEG):
         k = (i + 1) % SEG
@@ -388,9 +404,13 @@ def build_can(prim: str, doc: str, *, defect: bool, design=None) -> tuple[str, f
         material(prim, "CanLabel", label_rgb, 0.05, 0.52, label_tex),  # 라벨 띠
         material(prim, "TornEdge", (0.80, 0.81, 0.83), 0.92, 0.22),   # 찢긴 금속 단면
         material(prim, "Contents", (0.40, 0.26, 0.12), 0.0, 0.88),    # 드러난 내용물
+        # 위 테두리 띠 — 크로마키 그린·무광 (시각 표지, 사용자 요청으로
+        # 노랑에서 변경: 장면에 초록 계열이 없어 가장 잘 튄다)
+        material(prim, "RimBand", (0.0, 0.9, 0.2), 0.0, 0.45),
     ])
     meshes = [emit(prim, "shell", shell, "Steel",
-                   {"label": "CanLabel", "torn": "TornEdge"}, collision=True)]
+                   {"label": "CanLabel", "torn": "TornEdge",
+                    "rim_top": "RimBand"}, collision=True)]
     if defect:
         meshes.append(emit(prim, "contents", parts[1], "Contents", {}, collision=False))
 

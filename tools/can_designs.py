@@ -82,6 +82,21 @@ DESIGNS = [
         accent_rgb=(217, 164, 65),     # 금
         emblem="fig",
     ),
+    # corn_can — 원래는 외부 HOPE 에셋이었는데, 그 메시·물성이 생성 캔들과 달라
+    # 파지 때 그리퍼 폭주를 일으켰다(2026-08-10 수집 실측). 그래서 같은 자리(노랑)
+    # 를 지키는 생성 캔으로 교체했다 — 색상환 배치는 그대로: 빨강(normal) ·
+    # 노랑(corn) · 파랑(sardine) · 보라(fig).
+    CanDesign(
+        name="corn_can",
+        product="MAÍZ DULCE",
+        brand="SOL DE CAMPO",
+        tagline="GRANOS ENTEROS TIERNOS",
+        net="PESO NETO 340 g",
+        field_rgb=(211, 154, 20),      # 옥수수 골든 옐로
+        ink_rgb=(56, 38, 8),           # 짙은 갈색 — 노랑 위에서 잘 읽힌다
+        accent_rgb=(44, 98, 42),       # 껍질 잎 녹색
+        emblem="corn",
+    ),
 ]
 
 BY_NAME = {d.name: d for d in DESIGNS}

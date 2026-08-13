@@ -23,9 +23,10 @@
 
 ## 어떤 캔을 집는가
 
-순서는 시뮬레이션이 `order` 로 매겨 준다 (0 = 출구에 가장 가까움, 대기열은 -1).
-맨 앞만 계속 집으면 시연이 단조로우니 1·2번째를 섞되, 앞선 캔이 출구에 가까우면
-반드시 그것부터 — 안 놓치는 선에서 최대한 섞는다.
+배치(정적) 모드 — 벨트가 멈춰 있고 캔 3개가 무작위 위치에 놓여 있다
+(conveyor.py batch 모드). 도달 범위 안의 캔 중 **하나를 균등 무작위로** 고른다.
+순서를 위치·순번 규칙에 묶지 않아야 정책이 "어떤 캔이든 지시받은 대로 집는"
+행동을 배운다 (사용자 지정: 세 캔의 pick-and-place 순서 랜덤화).
 """
 from __future__ import annotations
 
@@ -178,31 +179,9 @@ FLAT_HALF_H = 0.022     # 반높이가 이보다 작으면 납작한 캔으로 �
 
 # ── 대상 선택 ─────────────────────────────────────────────────────────
 OUTLET_Y = 0.36
-# 집기에 필요한 최소 여유 시간 [s]. 접근 → 하강 → 닫기(3초) → 들기까지 걸린다.
-# 이보다 늦게 남은 캔은 **애초에 목표로 삼지 않는다** — 쫓아가도 도중에 출구로
-# 빠져 시도만 날린다(실측 5회 연속). 놓친 캔은 회수되어 대기열로 돌아간다.
-# 실측: TRANSIT(위로+수평) → APPROACH(하강) → DESCEND → CLOSE(3초) → LIFT 까지
-# 12~15초가 걸린다. 7초로 잡았더니 접근 도중 목표가 출구로 빠지는 실패가 4/6 였다.
-# 집기에 필요한 최소 여유 시간 [s].
-#
-# 22초로 잡았더니 여유 거리가 37cm 라 **출구에 가까운 캔이 전부 후보에서 빠져**,
-# 방금 올라온 캔만 집었다. 목적은 정반대다 — 떨어지기 직전의 캔을 먼저 치워야 한다.
-#
-# 짧게 잡아도 되는 이유는 그리퍼가 작업 구역에 들어오면 **벨트가 멈추기**
-# 때문이다(conveyor.py 의 update_hold). 캔이 흘러가는 것은 로봇이 다가가는
-# 동안뿐이라 8초면 충분하다.
-NEED_S = 8.0
-# 기본은 **맨 앞 캔**이다. 앞의 것을 먼저 치워야 출구로 빠져나가는 것을 막는다.
-# 두 번째를 고르는 것은 시연에 변화를 주기 위한 것 — 목표 지정이 항상 "맨 앞"
-# 이면 정책이 언어·관측이 아니라 순서 규칙만 배운다.
-SECOND_PROB = 0.40
-
-# 출구 쪽 **끝 30% 구간**. 여기에 캔이 있으면 무조건 그것부터 집는다 — 곧
-# 떨어질 캔이 최우선이고, 두 번째 섞기는 그다음 이야기다. 예전에는 "선두가
-# N초 안에 출구 도달" 이라는 시간 기준(CRITICAL_S)이었는데, 벨트 속도를 바꿀
-# 때마다 강제 구간의 길이가 널뛰어 두 번째 선택 비율까지 흔들었다. 위치 기준은
-# 속도와 무관하게 뜻이 그대로다. 벨트 사용 구간 -0.36~0.36 의 뒤쪽 30% 다.
-END_ZONE_Y = OUTLET_Y - 0.30 * (2 * OUTLET_Y)   # = 0.144
+# 배치(정적) 모드에서는 벨트가 멈춰 있어 낙하·타이밍 제약이 없다. 픽 위치
+# 다양성은 환경의 무작위 배치(conveyor.py BATCH_Y_RANGE)가, 픽 순서 다양성은
+# 아래 choose() 의 균등 무작위 선택이 만든다.
 
 # 목표가 벨트 목록에서 이만큼 연속으로 빠져 있어야 포기한다 [스텝].
 LOST_STEPS = 5
@@ -211,16 +190,10 @@ LOST_STEPS = 5
 # 접촉력은 솔버 특성상 매 스텝 깜빡인다(실측: 1.2N ↔ 0N 교대). 한 스텝만 보고
 # 판단하면 잘 물고 있는데도 ESCAPE 로 빠지면서 **그리퍼를 열어 캔을 떨어뜨린다.**
 GRIP_LOST_STEPS = 5
-REACH_Y = (-0.30, 0.34)
-# 두 번째 후보로 허용하는 최소 y. 실측에서 유일한 실제 링키지 폭주가 y=-0.253
-# 접근에서 났다 — 팔을 한껏 뻗는 자세라 IK 가 경직되는 지점이다. 맨 앞 캔은
-# 어차피 치워야 하니 제한하지 않고, **선택 사항인 두 번째만** 그 지점을 피한다.
-#
-# 처음에 -0.20 으로 잡았더니 두 번째 선택이 31% → 11% 로 죽었다. 간격 0.11 에서
-# 두 번째 후보는 거의 항상 첫 캔보다 0.11~0.22 뒤에 있어, -0.20 은 사실상
-# "두 번째 금지" 였다. 폭주 지점(-0.25)만 아슬하게 피하는 -0.26 로 완화한다 —
-# 폭주가 재발해도 이제 수집기가 3연속 실패에서 full 초기화로 회복한다.
-SECOND_MIN_Y = -0.26
+# 도달 범위 [m]. 배치 모드의 배치 범위(-0.26~0.30)를 여유 있게 덮는다.
+# 하한 -0.285 아래는 팔을 한껏 뻗는 자세라 IK 가 경직된다 (실측: y=-0.253
+# 접근에서 링키지 폭주 1회).
+REACH_Y = (-0.285, 0.34)
 
 # ── 통 ────────────────────────────────────────────────────────────────
 BIN_XY = (0.26, 0.58)
@@ -262,42 +235,34 @@ class TargetPicker:
     def __init__(self, seed: int = 0) -> None:
         self.rng = random.Random(seed)
         self.last_choice = None
+        self.picks = 0      # 지금까지 목표를 정한 횟수
 
     def choose(self, cans: list[dict], belt_order: list[str],
                belt_mps: float = 0.0) -> dict | None:
-        """belt_order 는 시뮬레이션이 준 **벨트 위 화물의 진행 순서**다.
+        """도달 범위 안의 캔 중 하나를 **균등 무작위로** 고른다.
 
-        여기 없는 화물은 대기열(상판 아래)이거나 굴러떨어진 것이라 후보가 아니다.
-        전에는 objects 배열에서 골랐더니 상판 아래로 초기화된 캔을 집으러 팔이
-        내려가는 일이 있었다.
+        belt_order 는 시뮬레이션이 준 **벨트 위 화물** 목록이다 (배치 모드에서는
+        순서가 의미 없고 "벨트 위에 있다" 는 사실만 쓴다). 여기 없는 화물은
+        대기 자리(상판 아래)이거나 굴러떨어진 것이라 후보가 아니다 — objects
+        배열에서 고르면 상판 아래로 숨긴 캔을 집으러 팔이 내려간다.
+
+        무작위 선택이 목적이다: 세 캔이 어느 위치에 있든, 남은 캔이 몇 개든,
+        다음에 집을 캔을 위치·순번 규칙에 묶지 않는다 (픽 순서 랜덤화).
         """
         by_name = {c["name"]: c for c in cans}
-        margin = belt_mps * NEED_S           # 멈춘 벨트면 0 — 시간 제약이 없다
         usable = []
-        for name in belt_order:                       # 이미 출구에 가까운 순서
+        for name in belt_order:
             c = by_name.get(name)
             if c is None:
                 continue
             y = c["pos"][1]
-            if not (REACH_Y[0] <= y <= REACH_Y[1]):
-                continue
-            if OUTLET_Y - y < margin:                 # 잡기 전에 빠져나간다
-                continue
-            usable.append(c)
+            if REACH_Y[0] <= y <= REACH_Y[1]:
+                usable.append(c)
         if not usable:
             self.last_choice = None
             return None
-        if len(usable) < 2:
-            self.last_choice = 0
-            return usable[0]
-        # 출구 쪽 30% 구간에 들어온 캔이 있으면 무조건 그것부터.
-        # usable 은 출구 가까운 순이라 [0] 만 보면 된다.
-        if usable[0]["pos"][1] >= END_ZONE_Y:
-            self.last_choice = 0
-            return usable[0]
-        idx = 1 if self.rng.random() < SECOND_PROB else 0
-        if idx == 1 and usable[1]["pos"][1] < SECOND_MIN_Y:
-            idx = 0                     # 두 번째가 너무 뒤쪽이면 무리하지 않는다
+        self.picks += 1
+        idx = self.rng.randrange(len(usable))
         self.last_choice = idx
         return usable[idx]
 
@@ -310,6 +275,10 @@ class PickPlacePolicy:
         # 속도 추정용 직전 EEF. reset() 에서 지우지 않는다 — 시도 사이에도 팔은
         # 이어서 움직이고 있으므로, 지우면 그 한 스텝만 감쇠가 빠진다.
         self.prev_eef = None
+        # 벨트 속도에 맞춘 이동 속도 배율 — 수집기가 에피소드마다 정한다.
+        # 빈손 이동(TRANSIT)과 운반(TO_BIN)에만 곱한다. 파지 정밀 구간
+        # (DESCEND·CLOSE·LIFT)은 속도를 올리면 파지율이 떨어져 그대로 둔다.
+        self.speed_scale = 1.0
         self.reset()
 
     def _begin_escape(self, eef, why: str) -> None:
@@ -407,6 +376,8 @@ class PickPlacePolicy:
         # 벨트를 따라가기 위한 속도 피드포워드 [m/스텝 명령]
         self.ff_y = belt_mps / (REALIZED * RATE_HZ)
         if self.stage == "SEARCH":
+            # 쓸 수 있는 캔이 보이면 **즉시** 집는다 — 픽 위치 다양성은
+            # 수집기의 벨트 속도 제어(collect.py)가 만들고, 정책은 멈추지 않는다.
             pick = self.picker.choose(cans, belt_order, belt_mps)
             if pick is None:
                 return [0.0, 0.0, 0.0, *rot], False, info
@@ -516,6 +487,11 @@ class PickPlacePolicy:
         err = math.sqrt(sum(v * v for v in err_vec))
         info["err"] = round(err, 4)
         limit = STAGE_MAX_STEP.get(self.stage, MAX_STEP)
+        # 속도 배율은 **빈손 이동에만** 곱한다. 운반(TO_BIN) 상한 0.10 은
+        # "더 낮춰도 놓침이 줄지 않던" 실측 최적값이라, 1.4배(0.14)로 올렸더니
+        # 운반 중 캔이 확률적으로 미끄러졌다(같은 픽 위치에서 성공/실패 반반).
+        if self.stage == "TRANSIT":
+            limit *= self.speed_scale
         delta3 = _clamp([ev * GAIN - DAMP * v for ev, v in zip(err_vec, vel)], limit)
         if self.stage in ("TRANSIT", "APPROACH", "DESCEND"):
             delta3[1] += self.ff_y
@@ -524,12 +500,17 @@ class PickPlacePolicy:
         # TO_BIN 까지 7mm 로 재고 있었더니, 0.4kg 캔을 든 팔이 통 위에서 그 안으로
         # 못 들어와 오차가 ±1cm 로 흔들렸다 — 화면에서는 "박스 위에서 캔을 든 채
         # 뜸을 들이는" 것으로 보인다. 통은 24x38cm 라 2cm 면 충분하다.
-        tol = POS_TOL if self.stage in ("APPROACH", "DESCEND") else COARSE_TOL
-        # 오차와 속도를 **함께** 본다. 속도를 안 보면 진동하며 공을 스쳐 지나가는
-        # 순간에도 도달로 세어져, 그 관성이 다음 단계의 진동이 된다.
-        if err < tol and speed < SETTLE_VMAX:
+        # 정밀 단계(APPROACH·DESCEND)만 오차·속도·유지 스텝을 엄격히 본다 —
+        # 파지 정확도가 걸려 있어서다. 나머지 단계(TRANSIT·LIFT·TO_BIN)는 오차만
+        # 넉넉히 보고 **즉시** 넘어간다. 전에는 모든 단계가 "감속 후 3스텝 유지"
+        # 라서 파지→운반·운반→투하 사이에 팔이 매번 멈칫했는데, 그 정지가 VLA
+        # 학습에 흡수 상태로 남는다(청크째 정지 예측 → 무한 대기). 관성을 안고
+        # 다음 단계로 넘어가도 DAMP 감쇠가 곧 잡아 준다.
+        precise = self.stage in ("APPROACH", "DESCEND")
+        tol = POS_TOL if precise else COARSE_TOL
+        if err < tol and (not precise or speed < SETTLE_VMAX):
             self.hold += 1
-            if self.hold >= SETTLE_STEPS:
+            if self.hold >= (SETTLE_STEPS if precise else 1):
                 self.hold = 0
                 if self.stage == "TRANSIT":
                     self.stage = "APPROACH"

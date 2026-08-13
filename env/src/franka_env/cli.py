@@ -84,6 +84,12 @@ def build_parser(
              "실물 컨베이어의 부하 변동을 흉내 내 데이터에 속도 변주를 넣는다.",
     )
     parser.add_argument(
+        "--batch", type=int, default=0, metavar="N",
+        help="0 보다 크면 배치(정적) 모드 — 벨트를 세우고 캔 N개를 무작위 위치에 "
+             "놓는다. train 은 다 치우면 재배치, test 는 정상 캔을 모두 담으면 "
+             "라운드 종료(trio_done) 후 전체 초기화. 0 이면 기존 연속 투입.",
+    )
+    parser.add_argument(
         "--grip-force", type=float, default=25.0, metavar="NM",
         help="그리퍼 관절 힘 상한 [Nm]. USD 기본은 finger_joint 16.5 / 링키지 5.0 이고 "
              "링키지 쪽이 실제 병목이다. 올리면 무거운 물체를 잡지만 폐루프 링키지가 "

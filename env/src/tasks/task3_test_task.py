@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""task3 평가 태스크 — 팽창·파열된 불량품이 섞여 흐른다.
+"""task3 평가 태스크 — 캔 3개 정적 배치, 파열품 1~2개 혼합 (배치 모드).
 
-train 과 설비는 완전히 같고(씬이 _can_workcell.usda 를 공유한다) 흐르는 물건만
-다르다. 정상품 5종에 그 짝인 파열품 5종을 더해 10종이 돌아간다.
+train 과 설비는 완전히 같고(씬이 _can_workcell.usda 를 공유한다) 배치되는
+물건만 다르다. 벨트는 정지 상태이고, 라운드마다 캔 3개가 무작위 위치에
+놓이는데 그중 1~2개가 파열품이다 (conveyor.py _spawn_batch — 정상과 파열이
+항상 공존한다). **정상 캔만 모두 통에 담으면** 시뮬레이션이 trio_done 이벤트를
+쏘고 전체 초기화해 새 라운드를 깐다 — 파열품은 벨트에 남겨 두는 것이 정답이다.
 
 짝을 맞춘 이유는 정책이 **결함 자체를** 보게 하기 위해서다. 불량품만 라벨이 다르면
 그림만 외워도 골라낼 수 있다. 파열품은 부푼 뚜껑·찌그러진 옆면·뜯긴 구멍만 다르고
@@ -63,7 +66,7 @@ class Task3TestPickPlaceCanTask(Task):
     instruction = {
         "default": "Pick up the cans from the conveyor and put them in the bin",
         "vague": "Move the cans into the bin",
-        "specific": "Grasp each can as it travels along the conveyor belt and place it inside the grey bin on the table, including the swollen and burst ones",
+        "specific": "Pick up only the intact cans from the stopped conveyor belt and place them inside the grey bin, leaving the swollen and burst ones on the belt",
     }
     # 사람이 조작하는 샌드박스라 넉넉히 잡는다 (24시간 — 1시간이었을 때 장시간 수집 중 매시간 soft 리셋이 시도를 끊었다).
     episode_length_s: int = 86400

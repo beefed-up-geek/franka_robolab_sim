@@ -30,12 +30,12 @@ over "world"
 {
     # -- 벨트에 처음부터 올려 두는 캔 (간격 0.24m) -------------------------
     def "corn_can" (
-        prepend payload = @../objects/hope/corn_can.usd@
+        prepend payload = @../objects/cans/corn_can.usda@
     )
     {
         quatf xformOp:orient = (1, 0, 0, 0)
         float3 xformOp:scale = (1, 1, 1)
-        double3 xformOp:translate = (0.52, -0.3, 0.2295)
+        double3 xformOp:translate = (0.52, -0.3, 0.229)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
     }
     def "normal_can" (

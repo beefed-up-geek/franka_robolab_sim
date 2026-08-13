@@ -221,7 +221,71 @@ def emblem_fig(d: ImageDraw.ImageDraw, cx: int, cy: int, r: int, design) -> None
     d.line([(lx + 4, ly), (lx + r * 0.68, ly - r * 0.03)], fill=skin, width=2)
 
 
-EMBLEMS = {"sardine": emblem_sardine, "fig": emblem_fig}
+def emblem_corn(d: ImageDraw.ImageDraw, cx: int, cy: int, r: int, design) -> None:
+    """옥수수 속대 — 낟알 격자와 밑동의 껍질 잎.
+
+    옥수수는 **위로 갈수록 좁아지는 낟알 기둥**이다. 낟알을 격자로 심되 속대
+    윤곽 안에만 두고, 밑동에서 껍질 잎이 양옆으로 벌어져야 옥수수로 읽힌다.
+    잎 없이 낟알 기둥만 그리면 파인애플이나 벌집으로 보인다.
+    """
+    kernel = design.field_rgb                       # 낟알 — 라벨 바탕과 같은 노랑
+    deep = tuple(max(0, c - 72) for c in kernel)    # 낟알 사이 골
+    husk = design.accent_rgb
+    husk_lit = tuple(min(255, c + 42) for c in husk)
+
+    cob_h = r * 1.42
+    top = cy - cob_h * 0.60                         # 아래를 조금 남겨 잎이 들어간다
+
+    def half_w(t: float) -> float:
+        # t=0 위끝(둥근 꼭지), t=1 밑동. 위쪽 1/4 에서 빠르게 넓어지고
+        # 아래는 거의 곧다 — 속대의 실루엣이다.
+        return r * 0.40 * (1 - (1 - t) ** 2.2) ** 0.5
+
+    steps = 36
+    right = [(cx + half_w(i / steps), top + cob_h * (i / steps))
+             for i in range(steps + 1)]
+    left = [(cx - half_w(i / steps), top + cob_h * (i / steps))
+            for i in range(steps, -1, -1)]
+    d.polygon(right + left, fill=deep)
+
+    # 낟알 — 줄줄이 심는다. 줄마다 반 칸씩 어긋나게 두면 실제 옥수수의
+    # 지그재그 배열이 된다. 골(deep)이 낟알 사이로 비쳐 격자로 읽힌다.
+    rows = 10
+    for i in range(rows):
+        t = 0.09 + 0.86 * i / (rows - 1)
+        y = top + cob_h * t
+        w = half_w(t) * 0.88
+        rw = r * 0.062
+        n = max(1, int(w / (rw * 1.25)))
+        off = (rw * 1.1) if i % 2 else 0.0
+        for k in range(-n, n + 1):
+            x = cx + off + k * (w * 2) / (2 * n + 1)
+            if abs(x - cx) > w:
+                continue
+            d.ellipse([x - rw, y - rw * 1.15, x + rw, y + rw * 1.15], fill=kernel)
+
+    # 껍질 잎 — 밑동에서 양옆 위로 벌어지는 두 장 + 아래로 처지는 짧은 한 장.
+    by = top + cob_h
+    for sgn, scale, tone in ((-1, 1.0, husk), (1, 1.0, husk), (0, 0.62, husk_lit)):
+        ln, leaf = 16, []
+        tip_x = cx + sgn * r * 0.78 * scale
+        tip_y = by - r * 0.66 * scale if sgn else by + r * 0.34
+        for i in range(ln + 1):                     # 바깥 가장자리 (밑동 → 끝)
+            u = i / ln
+            bulge = r * 0.30 * scale * math.sin(math.pi * u)
+            leaf.append((cx + (tip_x - cx) * u - sgn * bulge * 0.2,
+                         by + (tip_y - by) * u + (bulge if sgn == 0 else -bulge * 0.4)))
+        for i in range(ln, -1, -1):                 # 안쪽 가장자리 (끝 → 밑동)
+            u = i / ln
+            bulge = r * 0.16 * scale * math.sin(math.pi * u)
+            leaf.append((cx + (tip_x - cx) * u + sgn * bulge,
+                         by + (tip_y - by) * u + (bulge * 0.5 if sgn == 0 else bulge)))
+        d.polygon(leaf, fill=tone)
+        # 잎맥 — 밑동에서 끝까지 한 줄. 이것이 없으면 잎이 아니라 뿔로 보인다.
+        d.line([(cx, by - 2), (tip_x, tip_y)], fill=design.ink_rgb, width=2)
+
+
+EMBLEMS = {"sardine": emblem_sardine, "fig": emblem_fig, "corn": emblem_corn}
 
 
 # ── 뒷면 ────────────────────────────────────────────────────────────────

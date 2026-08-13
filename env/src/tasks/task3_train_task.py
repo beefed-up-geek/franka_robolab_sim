@@ -1,9 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
-"""task3 학습 태스크 — 정상품만 흐른다.
+"""task3 학습 태스크 — 정상품 3개 정적 배치 (배치 모드).
 
-정상 통조림 5종만 벨트를 타고 흘러온다. 높이가 32~58mm 로 제각각이라 파지 높이를
-매번 맞춰야 하고, 그만큼 시연 데이터에 변화가 생긴다. 결함이 있는 물건은 하나도
+벨트는 **정지** 상태이고, 정상 캔 3개가 벨트 위 무작위 위치에 놓인다
+(envs.py 의 batch=3 — conveyor.py 배치 모드). 셋을 모두 통에 담으면 환경이
+새 3개를 무작위 위치·무작위 종류로 재배치한다. 결함이 있는 물건은 하나도
 나오지 않으므로, 여기서 모은 시연으로 학습한 정책은 파열품을 본 적이 없다.
+
+움직이는 벨트(v3~v7)에서는 가변 속도 때문에 올바른 요격점이 한 프레임 관측으로
+정해지지 않아(같은 장면에 여러 정답) 폐루프 성공률이 0 으로 무너졌다 — 정적
+배치는 그 다봉성을 제거한 재설계다.
 
 성공 종료 조건을 넣지 않은 것은 의도적이다. RobolabEnv 는 에피소드가 종료되면
 env 를 freeze 시켜 액션을 0 으로 만들어버리므로(README 참고), 하나 담았다고
@@ -57,7 +62,7 @@ class Task3TrainPickPlaceCanTask(Task):
     instruction = {
         "default": "Pick up the cans from the conveyor and put them in the bin",
         "vague": "Move the cans into the bin",
-        "specific": "Grasp each can as it travels along the conveyor belt and place it inside the grey bin on the table",
+        "specific": "Grasp each of the three cans resting on the stopped conveyor belt and place it inside the grey bin on the table",
     }
     # 사람이 조작하는 샌드박스라 넉넉히 잡는다 (24시간 — 1시간이었을 때 장시간 수집 중 매시간 soft 리셋이 시도를 끊었다).
     episode_length_s: int = 86400

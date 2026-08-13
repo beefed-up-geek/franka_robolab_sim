@@ -17,18 +17,19 @@ SCENES = R / "env/asset/scenes"
 # 여기 없는 캔은 씬에 들어가지 않는다. 파일이 남아 있어도 마찬가지다 — 목록이
 # 곧 편성이다.
 CANS = {
-    "corn_can":          ("../objects/hope/corn_can.usd", 0.2295),
+    "corn_can":          ("../objects/cans/corn_can.usda", 0.2290),
     "normal_can":        ("../objects/cans/normal_can.usda", 0.2290),
     "sardine_can":       ("../objects/cans/sardine_can.usda", 0.2290),
     "fig_can":           ("../objects/cans/fig_can.usda", 0.2290),
-    "corn_can_burst":    ("../objects/cans/corn_can_burst.usd", 0.2414),
+    "corn_can_burst":    ("../objects/cans/corn_can_burst.usda", 0.2415),
     "burst_can":         ("../objects/cans/burst_can.usda", 0.2415),
     "sardine_can_burst": ("../objects/cans/sardine_can_burst.usda", 0.2415),
     "fig_can_burst":     ("../objects/cans/fig_can_burst.usda", 0.2415),
 }
-# normal_can · sardine_can · fig_can 은 형상·질량이 완전히 같고 라벨만 다르다.
-# 정책이 "종류가 늘었다" 를 물성 변화로 배우지 않게 하려는 것이다
-# (tools/can_designs.py, objects/cans/README.md 참고).
+# 정상 4종은 형상·질량이 완전히 같고 라벨만 다르다. 정책이 "종류가 늘었다" 를
+# 물성 변화로 배우지 않게 하려는 것이다 (tools/can_designs.py, cans/README.md).
+# corn_can 도 원래는 외부 HOPE 에셋(hope/corn_can.usd)이었는데, 물성이 달라
+# 파지 때 그리퍼 폭주를 일으켜 생성 캔으로 교체했다 (2026-08-10).
 NORMAL = ["corn_can", "normal_can", "sardine_can", "fig_can"]
 BURST = ["corn_can_burst", "burst_can", "sardine_can_burst", "fig_can_burst"]
 

@@ -585,7 +585,10 @@ def _run(args, simulation_app, world_cfg) -> None:
         defect_ratio=args.defect_ratio,
         spacing=args.spacing if args.spacing is not None else conveyor_mod.INLET_CLEARANCE,
         jitter=args.belt_jitter,
+        batch=getattr(args, "batch", 0),
     )
+    if belt.batch:
+        print(f"[env] 배치(정적) 모드 — 캔 {belt.batch}개, 벨트 정지", flush=True)
     if belt.ready:
         print(
             f"[env] 컨베이어 준비 — 반송 대상 강체 {belt.item_count}개"
@@ -658,6 +661,8 @@ def _run(args, simulation_app, world_cfg) -> None:
     t2_rope_def = None
     t2_wires = None    # task2: 시각 전용 Verlet 전선 (verlet_wire.py)
     t2_arm = None      # task2 test: 작업자 팔 침입 (worker_arm.py)
+    t3_round = 0       # task3 배치: 마지막으로 알린 라운드 번호
+    t3_done_step = None  # task3 배치(test): trio_done 을 쏜 스텝 — 잠시 뒤 full 리셋
     # 리셋해도 0 으로 돌아가지 않는 누적 스텝. 폭주가 "연속" 인지 판정하려면
     # 리셋을 건너 이어지는 시계가 필요하다.
     total_step = 0
@@ -689,6 +694,8 @@ def _run(args, simulation_app, world_cfg) -> None:
             ros.event("reset_done", step=step, level=reset, source="request")
             step = 0
             recycled = 0
+            t3_round = 0        # full 리셋이면 belt.reinit 이 라운드를 0 으로 되돌린다
+            t3_done_step = None
             if reset == "full":
                 # 전체 초기화는 폭주 이력도 지운다. 안 지우면 초기화 직후 한 번만
                 # 터져도 곧바로 다시 full 로 올라간다.
@@ -786,6 +793,30 @@ def _run(args, simulation_app, world_cfg) -> None:
         # 출구를 지난 화물을 입구로 되돌려 흐름을 끊기지 않게 한다.
         recycled += belt.recycle()
 
+        # ── task3 배치(정적 3캔) 모드 ──────────────────────────────────
+        # 라운드가 새로 깔리면 알리고(train 은 다 치우는 즉시 자동 재배치),
+        # test 는 정상 캔을 모두 치운 시점에 trio_done 을 쏜 뒤 잠시 여유를
+        # 두고 전체 초기화를 요청한다 — 마지막 캔이 통에 안착하는 장면이
+        # 잘리지 않게 하고, task2 완료 초기화(12스텝 지연)와 결을 맞춘다.
+        if belt.batch:
+            if belt.batch_round != t3_round:
+                t3_round = belt.batch_round
+                _st3 = belt.status()
+                ros.event("trio_spawn", step=step, round=t3_round,
+                          active=_st3.get("active"))
+            if belt.batch_done and t3_done_step is None:
+                t3_done_step = step
+                _st3 = belt.status()
+                print(f"[env] 라운드 완료 — 정상 캔 모두 처리 "
+                      f"(정상 {_st3.get('binned_ok')} · 파열 {_st3.get('binned_bad')})",
+                      flush=True)
+                ros.event("trio_done", step=step, round=belt.batch_round,
+                          binned_ok=_st3.get("binned_ok"),
+                          binned_bad=_st3.get("binned_bad"))
+            if t3_done_step is not None and step - t3_done_step > 12:
+                t3_done_step = None
+                state.request_reset("full")
+
         # task1(벨트 없음): 공구가 경계 테이프(y=-0.40)를 넘으면 **그 공구만**
         # 씬 기본 자세로 되돌린다 — 전달 판정이자 다음 시연 준비다. 정책은
         # 내려놓을 필요 없이 수평으로 들고 선을 넘기만 하면 된다.
@@ -862,10 +893,14 @@ def _run(args, simulation_app, world_cfg) -> None:
             _TERMS = {"connector_red": (0.0962, -0.0546, 0.208),
                       "connector_black": (-0.0962, -0.0523, 0.208)}
             _SLEEVE = 0.015
-            # 소켓이 속 빈 캡이라 포스트가 실제로 들어간다 — 바닥이 포스트
-            # 상단 아래 6mm 이상 내려간(=씌워진) 순간에만 부착으로 본다.
-            _R_XY = 0.016
-            _INSERT = -0.006
+            # 부착 판정은 '터치' — 닿으면 자성 스냅으로 꽂힌 상태가 된다
+            # (아래 자성 홀드가 매 스텝 단자 위 포즈로 고정). 판정은 둘 중 하나:
+            #  ① 소켓 바닥 중심이 포스트 상단 반경 _SNAP 구 안 (위/근접 접촉)
+            #  ② 플러그 몸통 원기둥의 바깥면이 포스트 상단에 닿음 (측면 접촉)
+            _SNAP = 0.025
+            _PLUG_R = 0.018    # 플러그 몸통 반경
+            _PLUG_H = 0.065    # 소켓 바닥 기준 몸통 높이
+            _TOUCH = 0.006     # 표면 접촉 여유
             _w, _x, _y, _z = (float(_bq[0]), float(_bq[1]), float(_bq[2]), float(_bq[3]))
             for _name, _off in _TERMS.items():
                 _obj = env.scene[_name]
@@ -896,29 +931,23 @@ def _run(args, simulation_app, world_cfg) -> None:
                 _dx = float(_cp[0]) - _term[0]
                 _dy = float(_cp[1]) - _term[1]
                 _dz = float(_cp[2]) - _term[2]
-                if _dx*_dx + _dy*_dy < _R_XY*_R_XY and -0.022 < _dz < _INSERT:
+                _dxy = math.sqrt(_dx*_dx + _dy*_dy)
+                if (_dx*_dx + _dy*_dy + _dz*_dz < _SNAP*_SNAP
+                        or (_dxy < _PLUG_R + _TOUCH
+                            and -_PLUG_H - 0.005 < _dz < 0.008)):
                     t2_attached[_name] = step
                     _pol = "B(+)" if _name == "connector_red" else "A(-)"
                     print(f"[env] 부착 — {_name} → {_pol} 단자", flush=True)
                     ros.event("connector_attached", step=step, connector=_name)
             if len(t2_attached) == 2 and step - max(t2_attached.values()) > 12:
-                for _name in ("connector_red", "connector_black"):
-                    _obj = env.scene[_name]
-                    _root = _obj.data.default_root_state.clone()
-                    _root[:, :3] += env.scene.env_origins
-                    _obj.write_root_pose_to_sim(_root[:, :7])
-                    _obj.write_root_velocity_to_sim(torch.zeros_like(_root[:, 7:]))
-                    _obj.reset()
-                t2_attached.clear()
-                if t2_rope:
-                    # 로프도 함께 복원 — 안 하면 남은 장력이 방금 초기화된
-                    # 커넥터를 끌어 넘어뜨린다 (실측)
-                    t2_rope.set_world_poses(t2_rope_def[0].clone(), t2_rope_def[1].clone())
-                    t2_rope.set_velocities(torch.zeros((t2_rope.count, 6), device=t2_rope_def[0].device))
-                if t2_wires:
-                    t2_wires.request_reset()
-                print("[env] 충전 연결 완료 — 커넥터·로프 초기화", flush=True)
+                # 두 플러그 모두 부착 → 환경 전체 초기화 (사용자 요청).
+                # 커넥터·로프만 되돌리던 부분 초기화를 full 리셋 요청으로 바꿨다 —
+                # 다음 루프의 요청 리셋 경로가 팔·로프·전선·부착 상태를 한꺼번에
+                # 되돌리고 reset_done 을 쏜다.
+                print("[env] 충전 연결 완료 — 환경 전체 초기화", flush=True)
                 ros.event("charging_done", step=step)
+                t2_attached.clear()
+                state.request_reset("full")
 
         # 제어 주파수 측정 (1초 창)
         hz_step += 1
@@ -1003,7 +1032,8 @@ def _run(args, simulation_app, world_cfg) -> None:
                     exploded=explode_steps >= EXPLODE_STEPS,
                     hz=hz, step=step, recycled=recycled,
                     **{k: belt.status().get(k)
-                       for k in ("binned", "off_belt", "queued", "belt_held")},
+                       for k in ("binned", "off_belt", "queued", "belt_held",
+                                 "binned_ok", "binned_bad", "round", "active")},
                     # 유효 속도(흔들림 반영)를 준다. 기준 속도를 주면 정책의 벨트
                     # 추종 피드포워드가 빨라진 구간에서 뒤처져 파지점이 밀린다.
                     belt_mpm=belt.current_mpm(),

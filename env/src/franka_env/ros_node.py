@@ -95,6 +95,7 @@ class RosBridge:
         self._node.create_subscription(Twist, f"{ns}/cmd/eef_delta", self._on_delta, q)
         self._node.create_subscription(Bool, f"{ns}/cmd/gripper", self._on_gripper, q)
         self._node.create_subscription(String, f"{ns}/cmd/reset", self._on_reset, q)
+        self._node.create_subscription(Float32, f"{ns}/cmd/belt", self._on_belt, q)
 
         self.ok = True
         print(f"[ros] 노드 franka_sim 기동 — 네임스페이스 {ns}", flush=True)
@@ -113,6 +114,10 @@ class RosBridge:
 
     def _on_gripper(self, msg) -> None:
         self.state.set_external_gripper(bool(msg.data))
+
+    def _on_belt(self, msg) -> None:
+        """벨트 속도 설정 [m/분]. 수집기가 에피소드마다 속도를 바꿀 때 쓴다."""
+        self.state.set_belt_mpm(float(msg.data))
 
     def _on_reset(self, msg) -> None:
         """초기화 요청. 빈 문자열이면 soft.

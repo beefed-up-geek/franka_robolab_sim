@@ -45,6 +45,13 @@ TASK_TEXT = "Pick up the cans from the conveyor and put them in the bin"
 CAMERAS = ("front", "top", "wrist")
 EPISODE_TIMEOUT_S = 150.0
 
+# 배치(정적) 모드 — 벨트는 정지 상태로 두고(0 m/분), 캔 3개는 환경이
+# 무작위 위치에 깔아 준다 (conveyor.py batch 모드). 픽 위치 다양성은 환경의
+# 무작위 배치가, 픽 순서 다양성은 정책의 균등 무작위 선택이 만든다.
+# 에피소드는 여전히 "집어서 통에 담기" 한 번이고, 세 개를 다 담으면 환경이
+# 새 3개를 재배치하므로 수집기는 라운드를 신경 쓸 필요가 없다.
+BELT_MPM = 0.0
+
 # 다른 에피소드보다 이 배율 넘게 길면 "너무 오래 걸린" 것으로 보고 버린다.
 # 성공했더라도 유난히 느린 시연은 머뭇거림째로 학습된다 — 짧고 고른 시연만 남긴다.
 # 중앙값 기준이라 느린 것이 몇 개 섞여도 기준 자체가 끌려가지 않는다.
@@ -106,6 +113,12 @@ class Collector(Node):
         self.pub_delta = self.create_publisher(Twist, "/franka/cmd/eef_delta", 10)
         self.pub_grip = self.create_publisher(Bool, "/franka/cmd/gripper", 10)
         self.pub_reset = self.create_publisher(String, "/franka/cmd/reset", 10)
+        self.pub_belt = self.create_publisher(Float32, "/franka/cmd/belt", 10)
+
+    def set_belt_mpm(self, mpm: float) -> None:
+        m = Float32()
+        m.data = float(mpm)
+        self.pub_belt.publish(m)
 
     def _on_eef(self, m) -> None:
         p, o = m.pose.position, m.pose.orientation
@@ -233,7 +246,11 @@ def main() -> int:
                            state_dim=4, action_dim=4, task=TASK_TEXT)
     policy = PickPlacePolicy(seed=args.seed)
     period = 1.0 / args.rate
-    saved, attempts, choices = 0, 0, {0: 0, 1: 0}
+    saved, attempts, choices = 0, 0, {}
+    # 벨트는 정지 — 배치 모드 환경은 어차피 구동하지 않지만, 상태 표시(m/분)와
+    # 정책의 피드포워드 입력이 0 으로 일치하도록 명시해 둔다.
+    node.set_belt_mpm(BELT_MPM)
+    pick_ys: list[float] = []           # 저장된 에피소드의 파지 시점 캔 y
 
     while True:
         if saved >= args.episodes:
@@ -256,6 +273,8 @@ def main() -> int:
         last = {}
         exploded_abort = False
         _prev_stage = None
+        pick_y = None
+        _stg_prev = None
         binned0 = node.status.get("binned", 0)
         done = aborted = False
         stages = []
@@ -293,10 +312,18 @@ def main() -> int:
                 stages.append(info.get("stage"))
             if "choice" in info:
                 choices[info["choice"]] = choices.get(info["choice"], 0) + 1
+            # 파지 시점(CLOSE 진입)의 목표 캔 y — 위치 커버리지 검증용
+            _stg = info.get("stage")
+            if _stg == "CLOSE" and _stg_prev != "CLOSE" and pick_y is None:
+                _tgt = next((c for c in node.cans()
+                             if c["name"] == info.get("target")), None)
+                if _tgt:
+                    pick_y = round(_tgt["pos"][1], 3)
+            _stg_prev = _stg
             last = info
-            # 처음 두 시도만 단계 전이를 찍는다 — 문제가 생기면 로그만으로
+            # 처음 여덟 시도만 단계 전이를 찍는다 — 문제가 생기면 로그만으로
             # 어느 단계에서 멈췄는지 보이도록. 그 뒤로는 에피소드 요약만 남긴다.
-            if attempts <= 2:
+            if attempts <= 8:
                 stg = info.get("stage")
                 if stg != _prev_stage:
                     tgt = next((c for c in node.cans()
@@ -347,8 +374,11 @@ def main() -> int:
             consec_fail = 0
             idx = writer.save_episode()
             saved += 1
+            if pick_y is not None:
+                pick_ys.append(pick_y)
             print(f"[collect] 에피소드 {idx} 저장 — {len(stages)}프레임, "
-                  f"시도 {attempts}회, 1번째/2번째 = {choices.get(0,0)}/{choices.get(1,0)}",
+                  f"시도 {attempts}회, 픽y={pick_y}, "
+                  f"선택분포 {dict(sorted(choices.items()))}",
                   flush=True)
         else:
             st = node.status
@@ -395,8 +425,19 @@ def main() -> int:
             time.sleep(2.0)
 
     print(f"[collect] 완료: {saved}개 저장 → {args.out}", flush=True)
-    print(f"[collect] 대상 선택 분포 — 첫 번째 {choices.get(0,0)}회 · "
-          f"두 번째 {choices.get(1,0)}회", flush=True)
+    print(f"[collect] 대상 선택 분포(후보 내 순번) — "
+          f"{dict(sorted(choices.items()))}", flush=True)
+    if pick_ys:
+        # 벨트 사용 구간(-0.36~0.36)을 6칸으로 나눈 파지 위치 히스토그램 —
+        # 위치 편향이 남았는지 숫자로 보인다.
+        edges = [-0.36 + i * 0.12 for i in range(7)]
+        bins = [0] * 6
+        for y in pick_ys:
+            k = min(5, max(0, int((y + 0.36) // 0.12)))
+            bins[k] += 1
+        label = " ".join(f"[{edges[i]:+.2f}~{edges[i+1]:+.2f}]{bins[i]}"
+                         for i in range(6))
+        print(f"[collect] 파지 y 분포 — {label}", flush=True)
     rclpy.shutdown()
     return 0
 

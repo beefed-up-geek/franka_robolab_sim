@@ -55,7 +55,8 @@ VERTICAL_QUAT = (0.7071068, 0.0, 0.7071068, 0.0)
 
 GRIP_Z_OFF = 0.087           # 커넥터 원점 → 패들 그립 중심
 SURFACE_Z = 0.0005
-PLACE_STOP_MARGIN = -0.018   # 소켓이 포스트를 타고 내려가 씌워질 때까지
+PLACE_STOP_MARGIN = 0.005    # 터치 부착 — 소켓 바닥이 포스트 상단에 닿을 때까지만
+                             # (환경이 반경 2.5cm 스냅으로 꽂아준다)
 
 CLOSE_PRESS_MAX = 0.005
 CLOSE_PRESS_STEPS = 2

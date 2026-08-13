@@ -234,6 +234,21 @@ class TeleopState:
             tz + r * math.sin(el),
         )
 
+    def set_belt_mpm(self, mpm: float) -> None:
+        """벨트 속도를 직접 지정한다 [m/분] — ROS /cmd/belt 가 부른다.
+
+        키보드 단계 목록에 없는 값이면 목록에 끼워 넣는다. 수집기가 에피소드마다
+        무작위 속도를 주는 용도라, 단계가 늘어나는 것은 문제되지 않는다.
+        """
+        mpm = max(0.0, float(mpm))
+        with self._lock:
+            if mpm not in self._belt_mpm:
+                self._belt_mpm.append(mpm)
+                self._belt_mpm.sort()
+                self._belt_ms = [v / 60.0 for v in self._belt_mpm]
+            self._belt_idx = self._belt_mpm.index(mpm)
+            self._belt_dirty = True
+
     def consume_belt(self) -> tuple[float, bool] | None:
         """벨트 설정이 바뀌었을 때만 (속도, 켜짐) 을 돌려준다. 아니면 None."""
         with self._lock:
