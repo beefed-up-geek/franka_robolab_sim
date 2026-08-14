@@ -58,7 +58,7 @@ def Xform "fig_can_burst" (
                 uniform token info:implementationSource = "sourceAsset"
                 uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
                 uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
-                color3f inputs:diffuse_color_constant = (0.243, 0.122, 0.302)
+                color3f inputs:diffuse_color_constant = (0.055, 0.231, 0.361)
                 asset inputs:diffuse_texture = @./textures/fig_can_label.png@ (
                     colorSpace = "sRGB"
                 )

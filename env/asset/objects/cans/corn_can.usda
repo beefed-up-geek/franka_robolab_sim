@@ -58,7 +58,7 @@ def Xform "corn_can" (
                 uniform token info:implementationSource = "sourceAsset"
                 uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
                 uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
-                color3f inputs:diffuse_color_constant = (0.827, 0.604, 0.078)
+                color3f inputs:diffuse_color_constant = (0.055, 0.231, 0.361)
                 asset inputs:diffuse_texture = @./textures/corn_can_label.png@ (
                     colorSpace = "sRGB"
                 )

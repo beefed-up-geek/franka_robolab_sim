@@ -395,7 +395,11 @@ def build_can(prim: str, doc: str, *, defect: bool, design=None) -> tuple[str, f
         p.shift_z(-(lo + hi) / 2)
 
     if design is None:
-        label_rgb, label_tex = (0.66, 0.12, 0.10), None      # 단색 적
+        # 단색 대조군(normal_can/burst_can). 예전에는 붉은색이었는데 2026-08-14
+        # 사용자 지시로 **전 캔 공통 마린 블루**가 됐다 — 색이 갈리면 평가에서
+        # 정책이 형상 대신 색으로 정상·파열을 가를 여지가 생긴다.
+        # (14, 59, 92)/255 — can_designs.py 의 field_rgb 와 같은 값이다.
+        label_rgb, label_tex = (0.055, 0.231, 0.361), None
     else:
         label_rgb = tuple(round(c / 255.0, 3) for c in design.field_rgb)
         label_tex = f"./textures/{design.texture_name}"

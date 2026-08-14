@@ -64,6 +64,8 @@ STAGE_MAX_STEP = {
     "LIFT": 0.05,       # 0.02 는 과했다 — 감쇠·마찰을 고친 뒤로는 0.05 로도 안 놓친다
     "TO_BIN": 0.10,     # 0.06~0.08 로 낮춰도 놓침이 줄지 않았다. 실측 최적값
     "TRANSIT": 0.18,    # 빈손 수평 이동 — 제일 빠르게
+    "VIA": 0.18,        # 경유점까지도 빈손 이동이라 같은 상한
+    "HOME": 0.16,       # 통에 넣고 홈으로 복귀 — 빈손이라 빠르게
 }
 ROT_GAIN = 3.0          # 자세 비례 이득
 MAX_ROT = 0.25          # 한 스텝 최대 회전 명령 [rad]
@@ -199,6 +201,33 @@ REACH_Y = (-0.285, 0.34)
 BIN_XY = (0.26, 0.58)
 BIN_DROP_TCP_Z = 0.26
 
+# ── 홈 복귀 ───────────────────────────────────────────────────────────
+# 캔을 통에 넣은 뒤 여기로 돌아온 다음 다음 캔을 집으러 간다 (사용자 지시).
+#
+# 이게 왜 중요한가: v8 은 통 위에서 곧바로 다음 캔으로 갔기 때문에 200개
+# 에피소드 중 199개가 **통 위(y≈0.55)에서 시작**했다. 그런데 추론은 리셋 후
+# 홈(y=0.000)에서 시작한다 — 모델이 사실상 본 적 없는 상태다. 실측에서 그
+# 불일치 하나로 폐루프가 0/10 이었고(팔이 y=−0.57 까지 밀려나 45초간 정지),
+# 준비 자세로 통 위에 세워 주면 3/3 이 됐다. 홈 복귀를 시연에 넣으면 모든
+# 에피소드가 홈에서 시작하므로 추론 조건과 학습 분포가 저절로 일치한다.
+#
+# 값은 리셋 직후 실측한 플랜지 위치다.
+HOME_POS = (0.360, 0.000, 0.472)
+HOME_TOL = 0.035        # 홈은 정확할 필요가 없다 — 다음 TRANSIT 이 어차피 옮긴다
+
+# ── 접근 경로 다양화 ──────────────────────────────────────────────────
+# 목표를 정한 뒤 곧바로 직선으로 가지 않고, 경유점(VIA)을 하나 거쳐 **둥글게**
+# 돌아간다 (사용자 지시). 직선 최단 경로만 시연하면 정책이 그 한 가지 경로에
+# 과적합해, 조금만 벗어나도 되돌아올 방법을 모른다 — 분포를 벗어난 뒤 복구하지
+# 못하는 것이 v5~v8 폐루프 실패의 공통 양상이었다.
+#
+# 경유점은 출발점과 목표의 중점을 기준으로 **수평 수직 방향으로** 흔들고
+# 높이도 함께 흔든다. 부호까지 무작위라 어떤 때는 왼쪽으로, 어떤 때는
+# 오른쪽으로 돌아간다.
+VIA_LATERAL = (0.06, 0.20)     # 중점에서 옆으로 비키는 거리 [m] (부호 무작위)
+VIA_Z_RANGE = (-0.03, 0.06)    # 경유 높이 = TRANSIT_Z + 이 범위 [m]
+VIA_MIN_DIST = 0.12            # 출발-목표가 이보다 가까우면 경유를 넣지 않는다 [m]
+
 
 # ── 쿼터니언 (w,x,y,z) ────────────────────────────────────────────────
 def _qmul(a, b):
@@ -272,6 +301,9 @@ class PickPlacePolicy:
 
     def __init__(self, seed: int = 0) -> None:
         self.picker = TargetPicker(seed)
+        # 경유점 추첨 전용 난수 — 목표 선택(picker)과 갈라 두어야 한쪽을
+        # 바꿔도 다른 쪽 시퀀스가 흔들리지 않는다.
+        self.rng = random.Random(seed * 7919 + 13)
         # 속도 추정용 직전 EEF. reset() 에서 지우지 않는다 — 시도 사이에도 팔은
         # 이어서 움직이고 있으므로, 지우면 그 한 스텝만 감쇠가 빠진다.
         self.prev_eef = None
@@ -303,6 +335,28 @@ class PickPlacePolicy:
         self.lost = 0
         self.no_grip = 0
         self.grasp_z = None          # 파지 시점의 캔 높이 (낙하 감지)
+        self.via_goal = None         # 이번 접근의 경유점 (없으면 직선)
+
+    def _make_via(self, eef, can) -> list[float] | None:
+        """출발점과 목표 사이에 경유점을 하나 뽑는다 — 둥글게 돌아가기 위한 것.
+
+        중점을 진행 방향의 **수직**으로 밀고 높이도 흔든다. 좌우 부호까지
+        무작위라 같은 배치라도 매번 다른 호를 그린다. 거리가 짧으면(이미 목표
+        위에 있으면) 경유를 넣지 않는다 — 억지로 넣으면 제자리에서 원을 그린다.
+        """
+        f = can["flange"]
+        gx, gy = f[0], f[1]
+        dx, dy = gx - eef[0], gy - eef[1]
+        dist = math.sqrt(dx * dx + dy * dy)
+        if dist < VIA_MIN_DIST:
+            return None
+        # 진행 방향의 수직 단위벡터
+        px, py = -dy / dist, dx / dist
+        off = self.rng.uniform(*VIA_LATERAL) * self.rng.choice((-1.0, 1.0))
+        vz = TRANSIT_Z + self.rng.uniform(*VIA_Z_RANGE)
+        return [(eef[0] + gx) / 2 + px * off,
+                (eef[1] + gy) / 2 + py * off,
+                vz]
 
     def _escape(self, eef):
         """실패했을 때 **수직으로만** 빠져나오는 목표.
@@ -325,6 +379,10 @@ class PickPlacePolicy:
 
     def _goal(self, can, eef, flange_offset):
         """단계별 목표 플랜지 위치. 잠글 단계는 잠근 값을 쓴다."""
+        if self.stage == "VIA":
+            return list(self.via_goal)
+        if self.stage == "HOME":
+            return list(HOME_POS)
         if self.stage == "TRANSIT":
             f = can["flange"]
             return [f[0], f[1] + self.lead, TRANSIT_Z]
@@ -346,7 +404,9 @@ class PickPlacePolicy:
             if self.stage == "TO_BIN" and eef[0] > 0.38 and self.locked_goal:
                 goal[2] = max(goal[2], self.locked_goal[2])
             return goal
-        return [BIN_XY[0], BIN_XY[1], BIN_DROP_TCP_Z + flange_offset + LIFT_H]  # RETREAT
+        # 여기 오는 단계는 없다 (모든 단계가 위에서 처리된다). 혹시 새 단계를
+        # 넣고 여기를 빠뜨렸을 때 팔이 안전한 곳(통 위)에 서 있게 하는 백스톱이다.
+        return [BIN_XY[0], BIN_XY[1], BIN_DROP_TCP_Z + flange_offset + LIFT_H]
 
     def act(self, eef, eef_quat, cans, flange_offset, belt_mps=0.0, gripping=False,
             belt_order=None):
@@ -383,7 +443,9 @@ class PickPlacePolicy:
                 return [0.0, 0.0, 0.0, *rot], False, info
             self.target_name = pick["name"]
             self.picked_index = self.picker.last_choice
-            self.stage = "TRANSIT"
+            # 경유점을 뽑아 둥글게 돌아간다. 가까우면 None 이라 곧바로 TRANSIT.
+            self.via_goal = self._make_via(eef, pick)
+            self.stage = "VIA" if self.via_goal else "TRANSIT"
             info.update(stage=self.stage, target=self.target_name,
                         choice=self.picked_index)
             return [0.0, 0.0, 0.0, *rot], False, info
@@ -399,6 +461,20 @@ class PickPlacePolicy:
                                           "abort": True, "why": why}
             return [*d3, *rot], False, {**info, "err": round(err, 4)}
 
+        if self.stage == "HOME":
+            # 통에 넣은 뒤 홈으로 복귀 — 목표 캔은 이미 통 안이라 여기서
+            # 캔 정보를 보지 않는다 (아래 목표 조회에 걸리면 안 된다).
+            goal = list(HOME_POS)
+            err_vec = [g - e for g, e in zip(goal, eef)]
+            err = math.sqrt(sum(v * v for v in err_vec))
+            d3 = _clamp([ev * GAIN - DAMP * v for ev, v in zip(err_vec, vel)],
+                        STAGE_MAX_STEP["HOME"])
+            if err < HOME_TOL:
+                self.reset()
+                return [0.0] * 6, False, {**info, "stage": "SEARCH",
+                                          "done": True, "err": round(err, 4)}
+            return [*d3, *rot], False, {**info, "err": round(err, 4)}
+
         can = next((c for c in cans if c["name"] == self.target_name), None)
         # 잡기 전 단계에서는 목표가 **벨트 순서 목록에 남아 있어야** 한다. 빠졌다는
         # 것은 회수됐거나 굴러떨어졌다는 뜻이고, 그 자리를 쫓아가면 상판 아래로
@@ -411,7 +487,7 @@ class PickPlacePolicy:
         # 벨트가 흐르며 순위가 바뀔 때마다 목표가 갈아치워져, 뒤쪽 캔으로 내려가다
         # 갑자기 앞쪽 캔으로 방향을 트는 일이 생긴다. 목표가 아예 회수됐을 때만
         # 포기한다.
-        if self.stage in ("TRANSIT", "APPROACH"):
+        if self.stage in ("VIA", "TRANSIT", "APPROACH"):
             if self.target_name in belt_order:
                 self.lost = 0
             else:
@@ -462,10 +538,12 @@ class PickPlacePolicy:
                                        self.locked_goal[2] + CLOSE_END_Z + LIFT_H]
                     self.stage = "LIFT"
                 else:
-                    # RETREAT 를 따로 두지 않는다. 다음 TRANSIT 이 어차피 안전
-                    # 높이로 올리므로 2.3초를 그냥 버리는 단계였다.
-                    self.reset()
-                    return [0.0] * 6, False, {**info, "done": True}
+                    # 놓았으면 **홈으로 돌아간 뒤** 에피소드를 마친다. 통 위에서
+                    # 곧바로 다음 캔으로 가면 모든 에피소드가 통 위에서 시작해,
+                    # 추론이 시작하는 홈 자세가 학습 분포 밖이 된다 (HOME_POS
+                    # 주석 참고 — 그 불일치로 폐루프가 0/10 이었다).
+                    self.stage = "HOME"
+                    return [0.0] * 6, False, {**info, "stage": "HOME"}
             # 제자리에 서 있지 않고 잠근 목표를 따라간다 — 벨트가 흐르면 목표도
             # 같이 흘러서, 그리퍼가 캔과 함께 움직이며 문다.
             gg = list(self.locked_goal or eef)
@@ -493,7 +571,7 @@ class PickPlacePolicy:
         if self.stage == "TRANSIT":
             limit *= self.speed_scale
         delta3 = _clamp([ev * GAIN - DAMP * v for ev, v in zip(err_vec, vel)], limit)
-        if self.stage in ("TRANSIT", "APPROACH", "DESCEND"):
+        if self.stage in ("VIA", "TRANSIT", "APPROACH", "DESCEND"):
             delta3[1] += self.ff_y
 
         # 정밀도가 필요한 것은 캔 바로 위(APPROACH)와 파지점(DESCEND) 뿐이다.
@@ -512,7 +590,9 @@ class PickPlacePolicy:
             self.hold += 1
             if self.hold >= (SETTLE_STEPS if precise else 1):
                 self.hold = 0
-                if self.stage == "TRANSIT":
+                if self.stage == "VIA":
+                    self.stage = "TRANSIT"
+                elif self.stage == "TRANSIT":
                     self.stage = "APPROACH"
                 elif self.stage == "APPROACH":
                     self.stage = "DESCEND"

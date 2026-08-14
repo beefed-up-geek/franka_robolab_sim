@@ -55,7 +55,7 @@ def Xform "normal_can" (
                 uniform token info:implementationSource = "sourceAsset"
                 uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
                 uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
-                color3f inputs:diffuse_color_constant = (0.66, 0.12, 0.1)
+                color3f inputs:diffuse_color_constant = (0.055, 0.231, 0.361)
                 float inputs:metallic_constant = 0.05
                 float inputs:reflection_roughness_constant = 0.52
                 token outputs:out (renderType = "material")

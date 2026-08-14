@@ -55,6 +55,20 @@ TASK2_TEXT_BLACK = "Plug the black charging connector into the battery negative 
 # (카운터가 0 으로 돌아가므로 아래 루프가 기준선을 되잡는다).
 TASK3_BELT_MPM = 0.0
 
+# 정책에 넘기기 전에 팔을 세워 두는 자세 [m]. 리셋 직후의 홈 자세는
+# (0.360, 0.000, 0.472) 인데, 학습 데이터의 **에피소드 시작 상태**는 통 위에서
+# 캔을 놓은 직후(x 평균 0.277, y 평균 +0.544, z 평균 0.409)다 — 수집이 연속
+# 환경이라 200개 중 199개가 그렇고, 홈에서 시작한 것은 첫 에피소드 하나뿐이다.
+#
+# 그 차이가 폐루프를 통째로 망가뜨렸다(실측): 홈(y=0)은 학습 분포에서 "통에서
+# 캔 쪽으로 내려오는 중" 인 상태라 정책이 계속 −y 를 내놓았고, 팔이 y=−0.57
+# (학습 최소 −0.26 보다 0.31m 밖)까지 밀려나 45초간 얼어붙었다. 통 쪽(y>0)에는
+# 한 번도 가지 않았다.
+#
+# 실제 설비도 사이클 시작 전에 로봇을 준비 자세로 보낸다. 정책이 자유롭게
+# 움직이기 전에 그 자세로 서보해 학습 분포 안에서 출발시킨다.
+READY_POSE = (0.27, 0.55, 0.41)
+
 
 class Bridge(Node):
     def __init__(self, action_mode: str = "delta") -> None:
@@ -148,6 +162,39 @@ class Bridge(Node):
             v = [c * limit / n for c in v]
         return tuple(v)
 
+    def goto(self, target, timeout: float = 12.0, tol: float = 0.025,
+             rate: float = 6.0) -> bool:
+        """팔을 목표 위치로 서보한다 (정책에 넘기기 전 준비 자세용).
+
+        수집기의 전문가 정책과 같은 비례 제어다 — 한 스텝 명령을 오차에 비례해
+        주되 상한으로 자른다. 그리퍼는 연 채로 둔다.
+        """
+        period = 1.0 / rate
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            if self.eef is None:
+                time.sleep(period)
+                continue
+            err = [t - e for t, e in zip(target, self.eef)]
+            n = math.sqrt(sum(v * v for v in err))
+            if n < tol:
+                self.halt()
+                return True
+            d = [v * 2.5 for v in err]
+            dn = math.sqrt(sum(v * v for v in d))
+            if dn > 0.12:
+                d = [v * 0.12 / dn for v in d]
+            m = Twist()
+            m.linear.x, m.linear.y, m.linear.z = d
+            m.angular.x, m.angular.y, m.angular.z = self.vertical_rot()
+            self.pub_delta.publish(m)
+            b = Bool()
+            b.data = False
+            self.pub_grip.publish(b)
+            time.sleep(period)
+        self.halt()
+        return False
+
     def request_reset(self, level: str = "full", timeout: float = 30.0) -> bool:
         self.events.clear()
         m = String()
@@ -183,6 +230,11 @@ def main() -> int:
     ap.add_argument("--reset-each", action="store_true",
                     help="task3 에서도 에피소드마다 full 초기화한다 (기본은 "
                          "연속 환경). 연속 환경 요인을 분리하는 진단용.")
+    ap.add_argument("--ready-pose", action="store_true",
+                    help="리셋 후 홈 대신 준비 자세(READY_POSE, 통 위)로 옮기고 "
+                         "정책을 시작한다. v8 처럼 **홈에서 시작하는 시연이 없는** "
+                         "데이터로 학습한 모델에만 필요하다 — v9 부터는 시연이 "
+                         "홈 복귀로 끝나 홈이 학습 분포 안이라 쓰지 않는다.")
     args = ap.parse_args()
 
     rclpy.init()
@@ -200,21 +252,33 @@ def main() -> int:
 
         period = 1.0 / args.rate
         ok = 0
+        bad = 0        # task3 test: 파열 캔을 통에 담은 횟수 (오분류)
         for ep in range(args.episodes):
             # task3 는 에피소드 사이에 환경을 초기화하지 않는다 — 캔을 하나
             # 담을 때마다 장면을 되돌리는 대신 벨트가 이어지는 연속 환경
             # 그대로 다음 에피소드를 센다(실제 라인과 같은 조건). 성공 판정이
             # binned "증가" 라 카운터가 이어져도 문제없다.
+            _did_reset = False
             if args.task != "task3" or ep == 0 or args.reset_each:
                 node.request_reset("full")
                 time.sleep(2.0)
+                _did_reset = True
             if args.task == "task3":
                 # 배치(정적) 모드 — 수집과 동일하게 벨트 정지.
                 node.set_belt_mpm(TASK3_BELT_MPM)
+                # 리셋으로 홈에 돌아왔으면 학습 분포의 시작 자세로 옮긴다.
+                if _did_reset and args.ready_pose:
+                    okp = node.goto(READY_POSE)
+                    print(f"[vla] 준비 자세 이동 {'완료' if okp else '시간초과'} "
+                          f"→ {[round(v, 3) for v in (node.eef or [])]}", flush=True)
             post(f"{args.server}/reset", {})
             node.events.clear()
             text = args.instruction or TASK_TEXT[args.task]
-            binned0 = node.status.get("binned", 0)
+            # 성공은 **정상 캔**이 통에 들어간 것으로 센다 (status.binned_ok).
+            # train 환경에는 파열 캔이 없어 binned 와 같고, test 환경에서는
+            # 파열 캔을 담은 실수(binned_bad)가 성공으로 세어지지 않는다.
+            binned0 = node.status.get("binned_ok", node.status.get("binned", 0))
+            bad0 = node.status.get("binned_bad", 0)
             ep_t0 = time.time()
             done = False
             steps = 0
@@ -229,11 +293,14 @@ def main() -> int:
                 infer_ms.append(res.get("ms", 0.0))
                 steps += 1
                 if args.task == "task3":
-                    _b = node.status.get("binned", 0)
+                    _b = node.status.get("binned_ok", node.status.get("binned", 0))
+                    _bad = node.status.get("binned_bad", 0)
                     if _b < binned0:
                         # test 환경의 라운드 종료(trio_done → full 리셋)로
                         # 카운터가 0 으로 돌아갔다 — 기준선을 되잡는다.
-                        binned0 = 0
+                        binned0, bad0 = 0, 0
+                    if _bad < bad0:
+                        bad0 = 0
                     if _b > binned0:
                         done = True
                 for e in list(node.events):
@@ -259,12 +326,17 @@ def main() -> int:
                     time.sleep(sleep)
             node.halt()
             ok += int(done)
+            # 파열 캔을 담은 것은 성공이 아니라 **오분류**다 — 따로 센다.
+            _mis = max(0, node.status.get("binned_bad", 0) - bad0)
+            bad += _mis
             avg = sum(infer_ms) / max(len(infer_ms), 1)
             print(f"[vla] ep{ep + 1}: {'성공' if done else '실패'} "
-                  f"({steps}스텝, {time.time() - ep_t0:.0f}s, 추론 {avg:.0f}ms) "
+                  f"({steps}스텝, {time.time() - ep_t0:.0f}s, 추론 {avg:.0f}ms"
+                  + (f", 파열 오담 {_mis}" if _mis else "") + ") "
                   f"— 누적 {ok}/{ep + 1}", flush=True)
         print(f"[vla] 결과: {ok}/{args.episodes} 성공 "
-              f"({100.0 * ok / max(args.episodes, 1):.0f}%)", flush=True)
+              f"({100.0 * ok / max(args.episodes, 1):.0f}%)"
+              + (f" · 파열 캔 오담 {bad}회" if bad else ""), flush=True)
         return 0
     finally:
         rclpy.try_shutdown()
