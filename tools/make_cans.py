@@ -363,17 +363,16 @@ def material(prim: str, name: str, rgb, metallic: float, rough: float,
         }}'''
 
 
-NORMAL_DOC = """정상 통조림 캔 — 파열품(burst_can)의 대조군.
+# normal_can 의 파열품만 이름 규칙에서 벗어난다 (normal_can_burst 가 아니라
+# burst_can). 씬·태스크 정의가 그 이름을 쓰고 있어 바꾸면 다 같이 고쳐야
+# 하므로, 생성기 쪽에서 이 하나만 예외로 매핑한다.
+BURST_NAME = {"normal_can": "burst_can"}
 
-    치수·재질·라벨이 burst_can 과 완전히 같고 결함만 없다. 불량품만 생김새가
-    통째로 다르면 라벨 그림만 외워도 분류가 되므로, 결함 자체를 보고 판단하게
-    하려면 이렇게 짝을 맞춘 정상품이 필요하다."""
-
-BURST_DOC = """파열된 통조림 캔 — 불량품 분류용.
-
+# 파열품 공통 설명 — 도안별 설명(_designed_doc)에 덧붙는다.
+BURST_NOTE = """
     식품 물류에서 팽창관(swollen can)은 내용물이 부패해 가스가 찬 불량품이고
-    파열된 캔은 폐기 대상이다. 정상품(normal_can)과 치수·재질·라벨이 같고
-    아래 세 가지만 다르다.
+    파열된 캔은 폐기 대상이다. 정상품과 치수·재질·라벨이 같고 아래 세 가지만
+    다르다.
       1. 위아래 뚜껑이 크게 부풂     — 내부 압력
       2. 옆면 깊은 찌그러짐          — 취급 중 손상
       3. 윗뚜껑이 찢겨 뜯겨 나감     — 파열, 내용물 노출
@@ -452,15 +451,16 @@ def Xform "{prim}" (
 
 def _designed_doc(design, *, defect: bool) -> str:
     what = "파열품" if defect else "정상품"
-    pair = design.burst_name if not defect else design.name
+    burst = BURST_NAME.get(design.name, design.burst_name)
+    pair = burst if not defect else design.name
     return f"""{design.brand} {design.product} — {what}.
 
-    normal_can/burst_can 과 **치수·질량·충돌 형상이 완전히 같다.** 라벨 도안만
-    다르다 (tools/can_designs.py). 정책이 캔 종류에 따라 다르게 잡을 이유가
-    없어야 하므로, 종류를 늘릴 때 물성은 건드리지 않는다.
+    **모든 캔이 치수·질량·충돌 형상이 같고** 라벨 도안만 다르다
+    (tools/can_designs.py). 정책이 캔 종류에 따라 다르게 잡을 이유가 없어야
+    하므로, 종류를 늘릴 때 물성은 건드리지 않는다. 색도 전부 같은 파랑이다.
 
     짝은 {pair} 다. 둘은 같은 라벨 이미지를 쓴다 — 파열품만 라벨이 다르면
-    정책이 결함이 아니라 그림을 외워서 골라내게 된다."""
+    정책이 결함이 아니라 그림을 외워서 골라내게 된다.{BURST_NOTE if defect else ""}"""
 
 
 def main() -> None:
@@ -468,13 +468,11 @@ def main() -> None:
     here = root / "env/asset/objects/cans"
     here.mkdir(parents=True, exist_ok=True)
 
-    jobs = [
-        ("normal_can", NORMAL_DOC, False, None),
-        ("burst_can", BURST_DOC, True, None),
-    ]
+    jobs = []
     for d in DESIGNS:
         jobs.append((d.name, _designed_doc(d, defect=False), False, d))
-        jobs.append((d.burst_name, _designed_doc(d, defect=True), True, d))
+        jobs.append((BURST_NAME.get(d.name, d.burst_name),
+                     _designed_doc(d, defect=True), True, d))
 
     for prim, doc, defect, design in jobs:
         text, height = build_can(prim, doc, defect=defect, design=design)

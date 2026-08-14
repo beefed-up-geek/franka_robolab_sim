@@ -65,6 +65,23 @@ LABEL_W, LABEL_H = 1536, 256
 # normal_can 은 이 표에 넣지 않는다 — 라벨 그림 없이 단색 재질만 쓰는 대조군이고,
 # 여기 넣으면 텍스처가 붙어 성격이 바뀐다. 단색도 같은 파랑이다(make_cans.py).
 DESIGNS = [
+    # normal_can — 예전에는 라벨 그림 없이 단색 재질만 쓰는 대조군이었다. 그런데
+    # 다른 캔이 전부 같은 파랑 라벨을 갖게 되자 **혼자만 민무늬 남색**이라
+    # 눈에 띄었다(2026-08-14 사용자 지적). 대조군의 원래 목적은 "정상품과
+    # 파열품이 같은 도안을 쓴다" 였지 "라벨이 없다" 가 아니므로, 다른 캔과 같은
+    # 형식의 라벨을 준다. 짝인 파열품 이름만 예외적으로 burst_can 이다
+    # (규칙대로면 normal_can_burst — make_cans.py 가 이 하나를 특별히 다룬다).
+    CanDesign(
+        name="normal_can",
+        product="JUDÍAS BLANCAS",
+        brand="PUERTO NUEVO",
+        tagline="COCIDAS AL NATURAL",
+        net="PESO NETO 400 g",
+        field_rgb=(14, 59, 92),        # 마린 블루 — 전 캔 공통
+        ink_rgb=(242, 229, 200),       # 따뜻한 크림 — 전 캔 공통
+        accent_rgb=(201, 146, 47),     # 놋쇠 — 전 캔 공통
+        emblem="bean",
+    ),
     CanDesign(
         name="sardine_can",
         product="SARDINAS",

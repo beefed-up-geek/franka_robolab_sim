@@ -1,10 +1,13 @@
 #usda 1.0
 (
-    doc = """정상 통조림 캔 — 파열품(burst_can)의 대조군.
+    doc = """PUERTO NUEVO JUDÍAS BLANCAS — 정상품.
 
-    치수·재질·라벨이 burst_can 과 완전히 같고 결함만 없다. 불량품만 생김새가
-    통째로 다르면 라벨 그림만 외워도 분류가 되므로, 결함 자체를 보고 판단하게
-    하려면 이렇게 짝을 맞춘 정상품이 필요하다.
+    **모든 캔이 치수·질량·충돌 형상이 같고** 라벨 도안만 다르다
+    (tools/can_designs.py). 정책이 캔 종류에 따라 다르게 잡을 이유가 없어야
+    하므로, 종류를 늘릴 때 물성은 건드리지 않는다. 색도 전부 같은 파랑이다.
+
+    짝은 burst_can 다. 둘은 같은 라벨 이미지를 쓴다 — 파열품만 라벨이 다르면
+    정책이 결함이 아니라 그림을 외워서 골라내게 된다.
 
     이 파일은 tools/make_cans.py 가 생성한다. 형상을 바꾸려면 USDA 를 직접 고치지
     말고 생성기를 고쳐서 두 캔을 함께 다시 만들 것 — 짝이 어긋나면 대조군의
@@ -56,6 +59,9 @@ def Xform "normal_can" (
                 uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
                 uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
                 color3f inputs:diffuse_color_constant = (0.055, 0.231, 0.361)
+                asset inputs:diffuse_texture = @./textures/normal_can_label.png@ (
+                    colorSpace = "sRGB"
+                )
                 float inputs:metallic_constant = 0.05
                 float inputs:reflection_roughness_constant = 0.52
                 token outputs:out (renderType = "material")

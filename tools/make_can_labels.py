@@ -285,7 +285,42 @@ def emblem_corn(d: ImageDraw.ImageDraw, cx: int, cy: int, r: int, design) -> Non
         d.line([(cx, by - 2), (tip_x, tip_y)], fill=design.ink_rgb, width=2)
 
 
-EMBLEMS = {"sardine": emblem_sardine, "fig": emblem_fig, "corn": emblem_corn}
+def emblem_bean(d: ImageDraw.ImageDraw, cx: int, cy: int, r: int, design) -> None:
+    """흰강낭콩 세 알 — normal_can 용.
+
+    콩은 **한쪽 옆구리가 파인 타원**이다. 그냥 타원으로 그리면 알약이나 달걀로
+    보이므로, 안쪽 곡선을 오목하게 눌러 콩눈(hilum) 자리를 만들고 거기에 짧은
+    선을 넣는다. 세 알을 겹쳐 쌓아야 낱알이 아니라 "콩 통조림"으로 읽힌다.
+    """
+    body = (238, 232, 214)          # 흰강낭콩 — 크림 잉크보다 조금 밝다
+    shade = design.accent_rgb
+    ink = design.ink_rgb
+
+    def one(bx: float, by: float, br: float, tilt: float) -> None:
+        pts, steps = [], 40
+        for i in range(steps + 1):
+            t = math.pi * 2 * i / steps
+            # 오목한 옆구리: cos 항이 음수인 구간에서 반지름을 줄인다
+            rad = br * (1.0 - 0.22 * max(0.0, math.cos(t)))
+            x, y = rad * 1.28 * math.cos(t), rad * math.sin(t)
+            pts.append((bx + x * math.cos(tilt) - y * math.sin(tilt),
+                        by + x * math.sin(tilt) + y * math.cos(tilt)))
+        d.polygon(pts, fill=body)
+        d.line(pts + [pts[0]], fill=shade, width=2)
+        # 콩눈 — 오목한 쪽 한가운데의 짧은 선
+        hx = bx + br * 1.06 * math.cos(tilt)
+        hy = by + br * 1.06 * math.sin(tilt)
+        d.line([(hx - 5 * math.sin(tilt), hy + 5 * math.cos(tilt)),
+                (hx + 5 * math.sin(tilt), hy - 5 * math.cos(tilt))],
+               fill=ink, width=3)
+
+    one(cx - r * 0.30, cy + r * 0.34, r * 0.36, -0.35)
+    one(cx + r * 0.34, cy + r * 0.22, r * 0.34, 0.55)
+    one(cx - r * 0.02, cy - r * 0.30, r * 0.38, 0.10)
+
+
+EMBLEMS = {"sardine": emblem_sardine, "fig": emblem_fig, "corn": emblem_corn,
+           "bean": emblem_bean}
 
 
 # ── 뒷면 ────────────────────────────────────────────────────────────────
