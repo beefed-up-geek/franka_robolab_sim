@@ -150,6 +150,12 @@ RECOVER_DZ = 0.08
 BATCH_Y_RANGE = (-0.26, 0.30)   # 캔을 놓는 y 범위 — 정책 도달 범위 안쪽
 BATCH_MIN_GAP = 0.13            # 캔 사이 최소 간격 [m] (지름 71mm + 여유)
 BATCH_X_JITTER = 0.02           # 벨트 중심에서 x 흔들림 [m] (반폭 0.08 안)
+# 파열품이 있는 씬(test)에서 한 라운드에 섞는 파열 캔 수. 2026-08-17 사용자
+# 지시로 1~2 무작위에서 **2 고정**으로 바꿨다. batch=3 이므로 매 라운드가
+# 정상 1 · 파열 2 가 되어, "셋 중 하나만 골라 담기" 라는 더 어려운 변별 과제가
+# 된다 — 무작위였을 때는 파열 1개(정상 2개) 라운드가 절반이라 아무거나 집어도
+# 성공할 여지가 있었다.
+BATCH_DEFECTS = 2
 
 # force 모드 — 벨트 마찰을 힘으로 흉내 낸다.
 # 목표 속도와의 차이에 비례해 힘을 주되, 실제 마찰이 낼 수 있는 최대 가속도로
@@ -846,7 +852,9 @@ class Conveyor:
         defects = [n for n in self._blocks if n in self._defects]
         k = min(self.batch, len(self._blocks))
         if defects and k >= 2:
-            nd = min(self._jr.choice((1, 2)), len(defects), k - 1)
+            # 정상 캔이 최소 하나는 남아야 하므로 k-1 로 자른다 (담을 것이
+            # 없으면 라운드가 즉시 끝나 평가가 성립하지 않는다).
+            nd = min(BATCH_DEFECTS, len(defects), k - 1)
             chosen = self._jr.sample(defects, nd) \
                 + self._jr.sample(normals, min(k - nd, len(normals)))
         else:
