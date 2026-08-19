@@ -4,8 +4,11 @@ set -euo pipefail
 
 C=franka_robolab_sim
 IMAGE=franka_robolab_sim:latest
-ROBOLAB_DIR="${ROBOLAB_DIR:-$HOME/robolab}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# RoboLab 프레임워크 — 2026-08-19 부터 이 레포 안(robolab/)에 산다. 컨테이너 안
+# 경로(/workspace/robolab)는 그대로다 — 이미지의 editable pip 설치가 그 경로를
+# 가리키므로 마운트 목적지를 바꾸면 import 가 깨진다.
+ROBOLAB_DIR="${ROBOLAB_DIR:-$REPO_DIR/robolab}"
 
 if [ "$(docker container inspect -f '{{.State.Running}}' $C 2>/dev/null)" = "true" ]; then
     echo "✓ 이미 실행 중: $C"; exit 0

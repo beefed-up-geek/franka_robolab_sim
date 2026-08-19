@@ -16,3 +16,6 @@ _tool_viewer/
 # robolab 에서 복사하는 대용량 공구 에셋 — tools/fetch_task1_assets.sh 로 재현
 env/asset/objects/tools/
 env/asset/fixtures/worker/
+
+# RoboLab 프레임워크 — 자체 git 저장소라 부모 레포에 넣지 않는다
+robolab/
