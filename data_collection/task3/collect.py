@@ -45,12 +45,17 @@ TASK_TEXT = "Pick up the cans from the conveyor and put them in the bin"
 CAMERAS = ("front", "top", "wrist")
 EPISODE_TIMEOUT_S = 150.0
 
-# 배치(정적) 모드 — 벨트는 정지 상태로 두고(0 m/분), 캔 3개는 환경이
-# 무작위 위치에 깔아 준다 (conveyor.py batch 모드). 픽 위치 다양성은 환경의
-# 무작위 배치가, 픽 순서 다양성은 정책의 균등 무작위 선택이 만든다.
-# 에피소드는 여전히 "집어서 통에 담기" 한 번이고, 세 개를 다 담으면 환경이
-# 새 3개를 재배치하므로 수집기는 라운드를 신경 쓸 필요가 없다.
-BELT_MPM = 0.0
+# 배치 모드 — 캔 3개는 환경이 무작위 위치에 깔아 준다 (conveyor.py batch 모드).
+# 픽 위치 다양성은 환경의 무작위 배치가, 픽 순서 다양성은 정책의 균등 무작위
+# 선택이 만든다. 에피소드는 여전히 "집어서 통에 담기" 한 번이고, 세 개를 다
+# 담으면 환경이 새 3개를 재배치하므로 수집기는 라운드를 신경 쓸 필요가 없다.
+#
+# 벨트 속도 — v10 부터 0 이 아니라 **아주 느리게** 돈다 (2026-08-17 사용자
+# 지시). 0.2 m/분 = 3.3 mm/s 로, 6Hz 한 스텝에 0.55mm 다. 그리퍼가 벨트 위에
+# 오면 환경이 벨트를 멈추므로(_held) 파지는 여전히 정지 문제이고, 캔이 흐르는
+# 것은 로봇이 통에 담고 홈을 거쳐 돌아오는 사이뿐이다 — 정책은 belt_mps
+# 피드포워드로 이미 그 흐름을 따라간다.
+BELT_MPM = 0.2
 
 # 다른 에피소드보다 이 배율 넘게 길면 "너무 오래 걸린" 것으로 보고 버린다.
 # 성공했더라도 유난히 느린 시연은 머뭇거림째로 학습된다 — 짧고 고른 시연만 남긴다.
@@ -307,13 +312,23 @@ def main() -> int:
             node.send(delta, close)
 
             if info.get("stage") != "SEARCH":
+                # 목표 캔의 **월드 좌표**도 프레임마다 남긴다 (v10). VLA_lang
+                # (steering command — 좌표 지시 학습, Steerable Policies 방식)의
+                # "reach for the can at [x, y]" 류 명령을 합성하려면 그 프레임에
+                # 정책이 노리던 캔이 어디 있었는지가 필요하다. 벨트가 저속으로
+                # 흐르므로 상수가 아니라 프레임별 기록이어야 한다.
+                _tp = next((c["pos"] for c in node.cans()
+                            if c["name"] == info.get("target")), None)
                 writer.add(
                     state=node.eef + [node.gripper],
                     action=[float(delta[0]), float(delta[1]), float(delta[2]),
                             1.0 if close else 0.0],
                     images=dict(node.images),
                     extra={"stage": info.get("stage", ""),
-                           "target": info.get("target") or ""},
+                           "target": info.get("target") or "",
+                           "target_x": float(_tp[0]) if _tp else float("nan"),
+                           "target_y": float(_tp[1]) if _tp else float("nan"),
+                           "target_z": float(_tp[2]) if _tp else float("nan")},
                 )
                 stages.append(info.get("stage"))
             if "choice" in info:

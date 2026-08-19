@@ -139,17 +139,25 @@ RECOVER_DX = 0.13
 RECOVER_DZ = 0.08
 
 # ── 배치(정적) 모드 ──────────────────────────────────────────────────────
-# batch > 0 이면 벨트를 세우고 캔 N개를 무작위 위치에 **정적으로** 놓는다.
-# 연속 투입(대기열→입구) 대신 라운드 방식이다:
+# batch > 0 이면 연속 투입(대기열→입구) 대신 캔 N개를 무작위 위치에 놓고
+# 라운드로 굴린다:
 #   train (파열품 없음)  N개를 모두 치우면 새 N개를 무작위 위치에 재배치
 #   test  (파열품 섞임)  정상 캔을 모두 통에 담으면 라운드 종료 표시만 하고,
 #                        전체 초기화는 runner 가 요청한다 (trio_done 이벤트)
 # 움직이는 벨트에서는 올바른 요격점이 한 프레임 관측으로 정해지지 않아
 # (가변 속도 → 같은 장면에 여러 정답) 회귀가 평균으로 무너졌다 — v5~v7 의
-# 폐루프 실패의 근본 원인. 정적 배치는 그 다봉성을 제거한다.
+# 폐루프 실패의 근본 원인. 배치 모드는 그 다봉성을 제거한다: 벨트는 v10 부터
+# 다시 돌지만 **아주 느리고**(0.2 m/분), 그리퍼가 벨트 위에 오면 멈추므로
+# (_held) 접근·파지 구간은 여전히 정지 문제다. _drive_batch() 설명 참고.
 BATCH_Y_RANGE = (-0.26, 0.30)   # 캔을 놓는 y 범위 — 정책 도달 범위 안쪽
 BATCH_MIN_GAP = 0.13            # 캔 사이 최소 간격 [m] (지름 71mm + 여유)
 BATCH_X_JITTER = 0.02           # 벨트 중심에서 x 흔들림 [m] (반폭 0.08 안)
+# 배치 모드의 **어큐뮬레이션 스토퍼** y [m]. 캔은 여기를 넘지 못하고 그 앞에
+# 줄지어 선다. 2026-08-17 사용자 지시로 벨트를 아주 느리게 다시 돌리는데,
+# 그냥 흘려보내면 라운드가 끝나기 전에 캔이 정책 도달 범위(REACH_Y 상한 0.34)와
+# 출구(OUTLET_Y 0.36)를 벗어나 문제가 아예 풀리지 않는다. 실제 물류 라인의
+# 어큐뮬레이션 컨베이어와 같은 처리다 — 벨트는 계속 돌고 캔만 막혀 선다.
+BATCH_STOP_Y = 0.32
 # 파열품이 있는 씬(test)에서 한 라운드에 섞는 파열 캔 수. 2026-08-17 사용자
 # 지시로 1~2 무작위에서 **2 고정**으로 바꿨다. batch=3 이므로 매 라운드가
 # 정상 1 · 파열 2 가 되어, "셋 중 하나만 골라 담기" 라는 더 어려운 변별 과제가
@@ -354,6 +362,11 @@ class Conveyor:
     @property
     def defect_count(self) -> int:
         return len(self._defects)
+
+    @property
+    def defects(self) -> frozenset[str]:
+        """불량품(파열 캔) 이름 — runner 의 안전 판정(파열 캔 접촉)이 쓴다."""
+        return self._defects
 
     # ── 벨트 ────────────────────────────────────────────────────────────
     def _check_belt(self) -> bool:
@@ -664,7 +677,10 @@ class Conveyor:
         if self.mode != "script":
             return 0
         if self.batch:
-            return 0        # 배치 모드 — 벨트는 항상 정지, 캔은 보통 강체로 남는다
+            # 배치 모드도 이제 돈다 — 다만 아주 느리게, 스토퍼 앞에 쌓이면서.
+            if not self.enabled or self.speed == 0.0 or self._held:
+                return 0
+            return self._drive_batch()
         if not self.enabled or not self._items:
             return 0
         # 속도가 0 이면 쓸 것이 없다. 그런데도 위치를 다시 쓰면 **정지한 벨트가
@@ -883,6 +899,61 @@ class Conveyor:
         print(f"[batch] 라운드 {self._batch_round} — "
               + ", ".join(f"{n}@y={y:+.2f}" for n, y in zip(chosen, ys)),
               flush=True)
+
+    def _drive_batch(self) -> int:
+        """배치 모드 구동 — 캔을 아주 느리게 전진시키되 스토퍼 앞에 쌓는다.
+
+        2026-08-17 사용자 지시로 벨트를 다시 돌린다. 다만 v5~v7 을 무너뜨린
+        **요격점 다봉성**(움직이는 캔은 한 관측에 여러 정답이 생겨 회귀가 평균
+        으로 무너진다)이 되살아나면 안 되므로 두 가지 장치를 둔다.
+
+          1. 아주 느린 속도 (기본 0.2 m/분 = 3.3 mm/s). 한 스텝(6Hz)에 0.55mm 라
+             정책의 서보가 여유 있게 따라잡는다.
+          2. 그리퍼가 벨트 위에 있는 동안은 상위 drive() 가 이미 멈춘다(_held).
+             즉 **접근·하강·파지 구간은 여전히 정지 문제**다. 캔이 흐르는 것은
+             로봇이 통으로 갔다가 홈을 거쳐 돌아오는 사이뿐이다.
+
+        스토퍼(BATCH_STOP_Y)와 앞 캔이 상한이다. 출구 쪽부터 처리해야 앞 캔의
+        확정 위치를 알고 뒤 캔의 상한을 정할 수 있어 내림차순으로 훑는다.
+        들려 있는 캔은 통로를 비운 것이므로 상한 계산에서 빠진다.
+        """
+        self._update_jitter()
+        origin = self.env.scene.env_origins[0]
+        device = self.env.device
+        dt = getattr(self.env, "step_dt", None) or (1.0 / 15.0)
+        advance = self.effective_speed() * dt
+
+        rows = []
+        for name in self._batch_active:
+            pos = self.env.scene[name].data.root_pos_w[0] - origin
+            rows.append((float(pos[1]), name, float(pos[0]), float(pos[2])))
+        rows.sort(reverse=True)
+
+        limit = BATCH_STOP_Y
+        driven = 0
+        for y, name, x, z in rows:
+            obj = self.env.scene[name]
+            if self._grasped(name) or not self._on_belt(name, x, y, z):
+                continue
+            ny = min(y + advance, limit)
+            limit = ny - BATCH_MIN_GAP
+            if ny - y < 1e-6:
+                continue
+            # x·요(yaw)는 배치 때 뽑은 값을 그대로 둔다 — 연속 모드처럼 벨트
+            # 중심으로 끌어당기면 라벨 방향과 x 흔들림이 매 스텝 지워진다.
+            rest_z = BELT_TOP_Z + self._half_height.get(name, BLOCK_HALF)
+            pose = torch.zeros((1, 7), device=device)
+            pose[0, 0] = x + origin[0]
+            pose[0, 1] = ny + origin[1]
+            pose[0, 2] = rest_z + origin[2]
+            pose[0, 3:7] = obj.data.root_quat_w[0]
+            obj.write_root_pose_to_sim(pose)
+            # 속도는 **0** 으로 쓴다. 연속 모드는 속도를 실어 주지만, 여기서는
+            # 벨트가 멈추는 구간(_held)이 잦아 잔류 속도가 남으면 정지해 있어야
+            # 할 캔이 계속 흘러간다 — 파지가 정지 문제라는 전제가 깨진다.
+            obj.write_root_velocity_to_sim(torch.zeros((1, 6), device=device))
+            driven += 1
+        return driven
 
     def _place_static(self, name: str, y: float) -> None:
         """캔을 벨트 위 (x 살짝 흔든) 자리에 무작위 요(yaw)로 놓는다."""
