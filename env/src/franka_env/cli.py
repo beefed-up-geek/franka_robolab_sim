@@ -90,6 +90,14 @@ def build_parser(
              "라운드 종료(trio_done) 후 전체 초기화. 0 이면 기존 연속 투입.",
     )
     parser.add_argument(
+        "--arm-seed", type=int, default=0, metavar="1~5",
+        help="task2 test 전용 — 작업자 팔이 들어오는 자리를 시드로 고정한다. "
+             "1~5 는 배터리와 발전기 **사이** 통로를 좌우로 훑는 다섯 지점 "
+             "(y -0.30/-0.20/-0.10/0.00/+0.10)이고, 높이는 운반 높이를 "
+             "가로막는 0.30 으로 전부 같다. 0 이면 초기화마다 y 를 무작위로 "
+             "뽑는다.",
+    )
+    parser.add_argument(
         "--grip-force", type=float, default=25.0, metavar="NM",
         help="그리퍼 관절 힘 상한 [Nm]. USD 기본은 finger_joint 16.5 / 링키지 5.0 이고 "
              "링키지 쪽이 실제 병목이다. 올리면 무거운 물체를 잡지만 폐루프 링키지가 "
