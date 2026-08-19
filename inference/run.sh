@@ -31,9 +31,13 @@ for _ in $(seq 1 120); do
 done
 
 TTY=$([ -t 1 ] && echo -t || true)
+# $* 가 아니라 printf %q 로 넘긴다 — $* 는 인용을 벗겨서 공백 있는 인자
+# (--instruction "reach for ...")가 단어별로 흩어져 argparse 가 즉사한다
+# (실측: VLA_lang 조향 검증 B/C 가 무출력으로 사라졌다).
+ARGS=$(printf "%q " "$@")
 docker exec $TTY $C bash -c \
     "export PYTHONPATH=$B/rclpy:\$PYTHONPATH \
         LD_LIBRARY_PATH=$B/lib:\$LD_LIBRARY_PATH \
         RMW_IMPLEMENTATION=rmw_fastrtps_cpp; \
      /isaac-sim/python.sh /workspace/franka_robolab_sim/inference/run_policy.py \
-        --task $TASK --server http://127.0.0.1:$PORT $*"
+        --task $TASK --server http://127.0.0.1:$PORT $ARGS"
