@@ -60,8 +60,7 @@ class Runner:
         self.policy.reset()
         self.n = 0
 
-    @torch.no_grad()
-    def act(self, state, images: dict, task: str):
+    def _batch(self, state, images: dict, task: str) -> dict:
         batch = {
             "observation.state": torch.tensor(
                 state, dtype=torch.float32).unsqueeze(0),
@@ -71,11 +70,33 @@ class Runner:
             arr = np.asarray(images[cam], dtype=np.float32) / 255.0     # HWC RGB
             t = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0)     # 1,C,H,W
             batch[f"observation.images.{cam}"] = t
-        obs = self.pre(batch)
+        return batch
+
+    @torch.no_grad()
+    def act(self, state, images: dict, task: str):
+        obs = self.pre(self._batch(state, images, task))
         act = self.policy.select_action(obs)
         act = self.post(act)
         self.n += 1
         return act.squeeze(0).float().cpu().numpy().tolist()
+
+    @torch.no_grad()
+    def act_chunk(self, state, images: dict, task: str, k: int):
+        """VLS 용 — flow 헤드에서 후보 청크 K 개를 뽑는다 (입자 다양성).
+
+        같은 관측에 대한 K 번의 독립 샘플이다. flow matching 은 노이즈에서
+        출발하므로 매 호출이 다른 궤적을 낸다. select_action 의 내부 액션
+        큐는 건드리지 않아 /act 경로와 간섭하지 않는다. 후처리(정규화 해제)는
+        (1,T,A) 텐서에 그대로 적용된다 — unnormalize 가 마지막 축만 본다.
+        """
+        chunks = []
+        for _ in range(max(1, min(int(k), 16))):
+            obs = self.pre(self._batch(state, images, task))
+            ch = self.policy.predict_action_chunk(obs)      # (1, T, A)
+            ch = self.post(ch)
+            chunks.append(ch.squeeze(0).float().cpu().numpy().tolist())
+        self.n += 1
+        return chunks
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -96,11 +117,16 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/reset":
             _STATE.reset()
             return self._send({"ok": True})
-        if self.path != "/act":
+        if self.path not in ("/act", "/act_chunk"):
             return self._send({"error": "unknown path"}, 404)
         t0 = time.time()
         images = {c: Image.open(io.BytesIO(base64.b64decode(req["images"][c]))).convert("RGB")
                   for c in CAMS}
+        if self.path == "/act_chunk":
+            chunks = _STATE.act_chunk(req["state"], images, req.get("task", ""),
+                                      req.get("k", 4))
+            return self._send({"chunks": chunks,
+                               "ms": round((time.time() - t0) * 1000, 1)})
         action = _STATE.act(req["state"], images, req.get("task", ""))
         self._send({"action": action, "ms": round((time.time() - t0) * 1000, 1)})
 
