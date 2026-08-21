@@ -177,10 +177,10 @@ def cut_tear(points, counts, indices, zmin, zmax, rmax):
     h = zmax - zmin
     prof = top_profile(points, rmax)
     tol = max(LID_TOL_MIN, LID_TOL_RATIO * h)
-    new_counts, new_idx, kept_corners = [], [], []
+    new_counts, new_idx, kept_corners, kept_faces = [], [], [], []
     lid = dropped = 0
     c = 0
-    for n in counts:
+    for fi, n in enumerate(counts):
         corners = indices[c:c + n]
         cx = sum(points[i][0] for i in corners) / n
         cy = sum(points[i][1] for i in corners) / n
@@ -196,8 +196,9 @@ def cut_tear(points, counts, indices, zmin, zmax, rmax):
             new_counts.append(n)
             new_idx.extend(corners)
             kept_corners.extend(range(c, c + n))
+            kept_faces.append(fi)
         c += n
-    return new_counts, new_idx, kept_corners, lid, dropped, prof
+    return new_counts, new_idx, kept_corners, kept_faces, lid, dropped, prof
 
 
 def add_patch(stage, root: str, name: str, rmax: float, z_top: float, h: float,
@@ -275,7 +276,7 @@ def burst(src_path: str, out_dir: str) -> str:
     rmax = max(math.hypot(p[0], p[1]) for p in pts)
 
     moved = deform(pts, zmin, zmax, rmax)
-    new_counts, new_idx, kept_corners, lid_faces, dropped, prof = \
+    new_counts, new_idx, kept_corners, kept_faces, lid_faces, dropped, prof = \
         cut_tear(moved, counts, idx, zmin, zmax, rmax)
     if dropped == 0:
         raise SystemExit(f"{name}: 뚜껑을 하나도 지우지 못했다 — 뚜껑 판정이 틀렸다")
@@ -292,38 +293,40 @@ def burst(src_path: str, out_dir: str) -> str:
     root = UsdGeom.Xform.Define(dst, root_path)
     dst.SetDefaultPrim(root.GetPrim())
 
-    # 원본 재질(텍스처 포함)을 통째로 복사한 뒤 텍스처 경로만 새 위치 기준으로 고친다
+    # 원본의 **모든 재질**을 복사한다 (2026-08-21). 하나만 복사해 통째로 바르면
+    # 뚜껑·바닥이 라벨 텍스처의 엉뚱한 부분을 뒤집어쓴다 — 정상 캔은 뚜껑
+    # 서브셋(rim_top=초록 띠, 기본=스틸)과 몸통(label)이 재질을 나눠 갖는다.
     src_layer = src.GetRootLayer()
-    # 재질이 여럿이면(normal_can 계열: Steel + CanLabel) **텍스처를 가진 것**을
-    # 고른다. "처음 발견한 재질" 은 순회 순서에 따라 무지 스틸이 걸려 라벨이
-    # 사라진다 (실측: 재생성한 파열 캔이 전부 민무늬가 됐다).
-    mat_root = None
-    for p in src.Traverse():
-        if not p.IsA(UsdShade.Material):
-            continue
-        if mat_root is None:
-            mat_root = p
-        has_tex = any(
-            isinstance(a.Get(), Sdf.AssetPath)
-            and a.Get().path.endswith((".png", ".jpg", ".jpeg"))
-            for q in Usd.PrimRange(p) for a in q.GetAttributes())
-        if has_tex:
-            mat_root = p
-            break
-    if mat_root is None:
-        raise SystemExit(f"{name}: 재질을 찾지 못했다")
-    dst_mat_path = f"{root_path}/Looks/{mat_root.GetName()}"
     dst.DefinePrim(f"{root_path}/Looks", "Scope")
-    Sdf.CreatePrimInLayer(dst.GetRootLayer(), Sdf.Path(dst_mat_path))
-    Sdf.CopySpec(src_layer, mat_root.GetPath(), dst.GetRootLayer(), Sdf.Path(dst_mat_path))
-
     src_dir = os.path.dirname(os.path.abspath(src_path))
-    for p in Usd.PrimRange(dst.GetPrimAtPath(dst_mat_path)):
-        for a in p.GetAttributes():
-            v = a.Get()
-            if isinstance(v, Sdf.AssetPath) and v.path.endswith((".png", ".jpg", ".jpeg")):
-                abs_tex = os.path.normpath(os.path.join(src_dir, v.path))
-                a.Set(Sdf.AssetPath(os.path.relpath(abs_tex, os.path.abspath(out_dir))))
+    src_mats = [p for p in src.Traverse() if p.IsA(UsdShade.Material)]
+    if not src_mats:
+        raise SystemExit(f"{name}: 재질을 찾지 못했다")
+    for m in src_mats:
+        mp = f"{root_path}/Looks/{m.GetName()}"
+        Sdf.CreatePrimInLayer(dst.GetRootLayer(), Sdf.Path(mp))
+        Sdf.CopySpec(src_layer, m.GetPath(), dst.GetRootLayer(), Sdf.Path(mp))
+        for p in Usd.PrimRange(dst.GetPrimAtPath(mp)):
+            for a in p.GetAttributes():
+                v = a.Get()
+                if isinstance(v, Sdf.AssetPath) and v.path.endswith((".png", ".jpg", ".jpeg")):
+                    abs_tex = os.path.normpath(os.path.join(src_dir, v.path))
+                    a.Set(Sdf.AssetPath(os.path.relpath(abs_tex, os.path.abspath(out_dir))))
+    # 본체의 기본 바인딩(서브셋 밖 면들) — 원본 것을 따르고, 없으면 텍스처
+    # 재질(HOPE 스캔 단일 재질), 그것도 없으면 첫 재질.
+    _src_bind = UsdShade.MaterialBindingAPI(src_mesh.GetPrim()) \
+        .GetDirectBinding().GetMaterialPath()
+    if _src_bind and not _src_bind.isEmpty:
+        _default_mat = _src_bind.name
+    else:
+        _default_mat = src_mats[0].GetName()
+        for m in src_mats:
+            if any(isinstance(a.Get(), Sdf.AssetPath)
+                   and a.Get().path.endswith((".png", ".jpg", ".jpeg"))
+                   for q in Usd.PrimRange(m) for a in q.GetAttributes()):
+                _default_mat = m.GetName()
+                break
+    dst_mat_path = f"{root_path}/Looks/{_default_mat}"
 
     # ── 변형된 본체 ──────────────────────────────────────────────────
     mesh = UsdGeom.Mesh.Define(dst, f"{root_path}/shell")
@@ -358,9 +361,35 @@ def burst(src_path: str, out_dir: str) -> str:
     UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(
         UsdShade.Material(dst.GetPrimAtPath(dst_mat_path)))
 
+    # 서브셋(재질 분할)을 승계한다 — 면이 지워졌으므로 원본 면 번호를
+    # "남긴 면 목록에서의 새 위치" 로 재매핑한다. 뜯겨 나간 면은 버린다.
+    new_pos = {f: i for i, f in enumerate(kept_faces)}
+    for sub in src_mesh.GetPrim().GetChildren():
+        if sub.GetTypeName() != "GeomSubset":
+            continue
+        old_ids = UsdGeom.Subset(sub).GetIndicesAttr().Get() or []
+        remap = [new_pos[f] for f in old_ids if f in new_pos]
+        if not remap:
+            continue
+        sub_mat = UsdShade.MaterialBindingAPI(sub).GetDirectBinding().GetMaterialPath()
+        d = UsdGeom.Subset.Define(dst, f"{root_path}/shell/{sub.GetName()}")
+        d.CreateElementTypeAttr(UsdGeom.Tokens.face)
+        d.CreateFamilyNameAttr("materialBind")
+        d.CreateIndicesAttr(Vt.IntArray(remap))
+        if sub_mat and not sub_mat.isEmpty:
+            UsdShade.MaterialBindingAPI.Apply(d.GetPrim()).Bind(
+                UsdShade.Material(dst.GetPrimAtPath(
+                    f"{root_path}/Looks/{sub_mat.name}")))
+
     # ── 뚫린 자리 막음 ───────────────────────────────────────────────
-    torn = plain_material(dst, f"{root_path}/Looks/TornEdge", (0.80, 0.81, 0.83), 0.92, 0.22)
-    cont = plain_material(dst, f"{root_path}/Looks/Contents", (0.40, 0.26, 0.12), 0.0, 0.88)
+    torn = (f"{root_path}/Looks/TornEdge"
+            if dst.GetPrimAtPath(f"{root_path}/Looks/TornEdge")
+            else plain_material(dst, f"{root_path}/Looks/TornEdge",
+                                (0.80, 0.81, 0.83), 0.92, 0.22))
+    cont = (f"{root_path}/Looks/Contents"
+            if dst.GetPrimAtPath(f"{root_path}/Looks/Contents")
+            else plain_material(dst, f"{root_path}/Looks/Contents",
+                                (0.40, 0.26, 0.12), 0.0, 0.88))
     h_can = zmax - zmin
     add_patch(dst, root_path, "torn_inner", rmax, lid_rim_z, h_can, torn, "wall")
     add_patch(dst, root_path, "contents", rmax, lid_rim_z, h_can, cont, "contents")
