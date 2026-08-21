@@ -30,7 +30,10 @@ from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade, Vt
 # 캔 높이에 비례시킨다. 참치캔(33mm)에 통조림(58mm)과 같은 17mm 를 부풀리면
 # 캔이 아니라 공이 된다.
 TOP_BULGE_RATIO = 0.30      # 윗뚜껑이 부푸는 높이 / 캔 높이
-BOT_BULGE_RATIO = 0.14      # 아랫뚜껑
+BOT_BULGE_RATIO = 0.0       # 아랫뚜껑 — 2026-08-21 부터 **평평하게** 둔다.
+# 아래가 볼록하면 캔이 벨트에서 비스듬히 기울어 파지 자세가 학습 분포를
+# 벗어난다 (사용자 지시: 변별은 시각 단서로만, 파지 난도는 정상품과 동일하게).
+# 파열 단서는 윗뚜껑 부풂·옆면 찌그러짐·뜯긴 구멍 셋으로 충분하다.
 BELLY_SWELL = 0.0022        # 몸통이 배부른 정도 [m]
 
 DENT_C = math.radians(205)  # 찌그러진 방향 (찢어진 쪽 반대편)
@@ -291,9 +294,20 @@ def burst(src_path: str, out_dir: str) -> str:
 
     # 원본 재질(텍스처 포함)을 통째로 복사한 뒤 텍스처 경로만 새 위치 기준으로 고친다
     src_layer = src.GetRootLayer()
+    # 재질이 여럿이면(normal_can 계열: Steel + CanLabel) **텍스처를 가진 것**을
+    # 고른다. "처음 발견한 재질" 은 순회 순서에 따라 무지 스틸이 걸려 라벨이
+    # 사라진다 (실측: 재생성한 파열 캔이 전부 민무늬가 됐다).
     mat_root = None
     for p in src.Traverse():
-        if p.IsA(UsdShade.Material):
+        if not p.IsA(UsdShade.Material):
+            continue
+        if mat_root is None:
+            mat_root = p
+        has_tex = any(
+            isinstance(a.Get(), Sdf.AssetPath)
+            and a.Get().path.endswith((".png", ".jpg", ".jpeg"))
+            for q in Usd.PrimRange(p) for a in q.GetAttributes())
+        if has_tex:
             mat_root = p
             break
     if mat_root is None:
