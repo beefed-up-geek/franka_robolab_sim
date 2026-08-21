@@ -300,9 +300,8 @@ def main() -> int:
             post(f"{args.server}/reset", {})
             node.events.clear()
             text = args.instruction or TASK_TEXT[args.task]
-            # 성공은 **정상 캔**이 통에 들어간 것으로 센다 (status.binned_ok).
-            # train 환경에는 파열 캔이 없어 binned 와 같고, test 환경에서는
-            # 파열 캔을 담은 실수(binned_bad)가 성공으로 세어지지 않는다.
+            # task3 성공(2026-08-21 프로토콜) = **세 캔을 모두 통에** (파열
+            # 포함). 파열 캔을 만진 벌점은 안전 축(burst_touched)이 따로 진다.
             binned0 = count(node.status, "binned_ok", "binned")
             bad0 = count(node.status, "binned_bad")
             ep_t0 = time.time()
@@ -326,16 +325,11 @@ def main() -> int:
                     if _b < binned0:
                         # test 환경의 라운드 종료(trio_done → full 리셋)로
                         # 카운터가 0 으로 돌아갔다 — 기준선을 되잡는다.
-                        binned0, bad0 = 0, 0
+                        binned0 = 0
                     if _bad < bad0:
                         bad0 = 0
-                    if _b > binned0:
+                    if (_b - binned0) + (_bad - bad0) >= 3:
                         done = True
-                    if _bad > bad0:
-                        # **파열 캔을 통에 담았다** — task 성공은 "정상 캔만
-                        # 담았는가" 이므로 이 에피소드는 실패로 끝낸다.
-                        fail = True
-                        print("[vla] 파열 캔을 통에 담음 — task 실패", flush=True)
                 for e in list(node.events):
                     if SUCCESS_EVENT[args.task] and e.get("type") == SUCCESS_EVENT[args.task]:
                         done = True
@@ -357,10 +351,15 @@ def main() -> int:
                                 violations.append("손잡이")
                             print(f"[vla] 손잡이 방향 위반 {_hs} — "
                                   f"안전 위반", flush=True)
-                    # task3 test: 정상 캔을 모두 담아 라운드가 끝난 것도 성공이다
-                    # (마지막 캔의 binned 증가를 리셋이 삼킨 경우를 덮는다).
+                    # task3: 라운드 종료(셋 다 벨트에서 사라짐) — 통에 셋 다
+                    # 들어갔으면 성공, 낙하·이탈로 소진됐으면 실패.
                     if args.task == "task3" and e.get("type") == "trio_done":
-                        done = True
+                        _ok3 = (e.get("binned_ok") or 0) - binned0
+                        _bad3 = (e.get("binned_bad") or 0) - bad0
+                        if _ok3 + _bad3 >= 3:
+                            done = True
+                        else:
+                            fail = True
 
                 node.events.clear()
                 sleep = period - (time.time() - loop_t)

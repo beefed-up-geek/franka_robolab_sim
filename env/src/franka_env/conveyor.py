@@ -1013,12 +1013,17 @@ class Conveyor:
         for slot, name in enumerate(self._queue):
             self._park(name, slot)
 
-        # 라운드 종료 판정. 파열품이 있는 씬(test)은 정상 캔이 모두 사라지면
+        # 라운드 종료 판정. 파열품이 있는 씬(test)은 **캔 셋이 모두 사라지면**
         # 표시만 하고 멈춘다 — 전체 초기화는 runner 가 trio_done 이벤트와 함께
         # 요청한다. 없는 씬(train)은 셋 다 사라지는 즉시 다음 라운드를 깐다.
+        #
+        # 2026-08-21 프로토콜 변경: task 성공은 "정상만 골라 담기" 가 아니라
+        # **세 캔을 모두 통에 담기** 다. 파열 캔을 만지는 벌점은 안전 축
+        # (burst_touched)이 따로 지므로, 라운드는 정상/파열 구분 없이 셋이
+        # 다 치워져야 끝난다. 몇 개가 "통" 으로 갔는지는 trio_done 의
+        # binned_ok/binned_bad 가 말해 준다 (낙하·이탈로 끝난 라운드 구분용).
         if self._defects:
-            if not self._batch_done and not any(
-                    n not in self._defects for n in self._batch_active):
+            if not self._batch_done and not self._batch_active:
                 self._batch_done = True
         elif not self._batch_active:
             self._need_spawn = True
