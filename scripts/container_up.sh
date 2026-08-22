@@ -18,6 +18,7 @@ if docker container inspect $C >/dev/null 2>&1; then
 fi
 
 [ -d "$ROBOLAB_DIR" ] || { echo "✗ RoboLab 저장소가 없습니다: $ROBOLAB_DIR"; exit 1; }
+[ -d "$HOME/franka_robolab_sim_methods" ] && METHODS_MOUNT=1 || METHODS_MOUNT=""
 mkdir -p "$HOME/.cache/ov" "$HOME/.cache/kit" "$REPO_DIR/logs"
 
 # RoboLab 은 로봇 설정과 파이썬 패키지 때문에 필요하다.
@@ -29,6 +30,7 @@ docker run -d -it --name $C \
     -e ACCEPT_EULA=Y -e OMNI_KIT_ACCEPT_EULA=YES \
     -v "$ROBOLAB_DIR":/workspace/robolab \
     -v "$REPO_DIR":/workspace/franka_robolab_sim \
+    ${METHODS_MOUNT:+-v "$HOME/franka_robolab_sim_methods":/workspace/methods} \
     -v "$HOME/.cache/ov":/root/.cache/ov \
     -v "$HOME/.cache/kit":/isaac-sim/kit/cache \
     --restart unless-stopped \
